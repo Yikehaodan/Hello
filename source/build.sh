@@ -13,6 +13,7 @@ if [[ ! -f 'Knock.app/Contents/Resources/SpeechRuntime/READY' ]]; then
 fi
 mkdir -p 'Knock.app/Contents/Resources/SpeechModels'
 cp source/speech-runtime/*.py source/speech-runtime/models.json 'Knock.app/Contents/Resources/SpeechModels/'
+cp THIRD_PARTY_NOTICES.md 'Knock.app/Contents/Resources/'
 rm -rf 'Knock.app/Contents/Resources/SpeechModels/__pycache__'
 # 隔离本机旧版 SwiftBridging 文件，不修改系统工具链。
 build_temp=$(mktemp -d "${TMPDIR:-/tmp}/lightvoice.XXXXXX")

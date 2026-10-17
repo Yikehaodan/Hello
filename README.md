@@ -8,7 +8,11 @@
   <img src="https://img.shields.io/badge/Swift-native-F2F5ED?style=flat-square&amp;logo=swift&amp;labelColor=183D32" alt="Native Swift" />
 </p>
 <p align="center"><strong>轻叩，开口。</strong><br/>把声音带进你正在使用的应用。</p>
-<p align="center"><a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
+<p align="center">
+  <a href="https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg"><img src="https://img.shields.io/badge/下载_Knock_for_macOS-v0.9.0-B8EFCC?style=for-the-badge&amp;logo=apple&amp;logoColor=183D32&amp;labelColor=183D32" alt="下载 Knock v0.9.0 for macOS" /></a>
+</p>
+<p align="center"><sub>Apple Silicon · macOS 14+ · 首个公开预览版 · 尚未经过 Apple 公证</sub></p>
+<p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Knock/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
 
 ## 一句话，接着做
 
@@ -30,7 +34,22 @@ Knock 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一�
 
 ## 开始使用
 
-当前提供源码构建。需要 Xcode 命令行工具、CMake 和 Python 3.9 或更新版本。
+### 直接下载安装
+
+**[下载 Knock v0.9.0 安装包（DMG）](https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Knock/releases/tag/v0.9.0)
+
+1. 打开 DMG，把 `Knock.app` 拖入 `Applications`，从“应用程序”启动。
+2. 按首次引导设置麦克风与辅助功能权限。屏幕录制可选。
+3. 在“设置 → 语音模型”中下载并选择一个模型。中文听写可先选 Zipformer，多语言可选 Whisper 或 SenseVoice。
+4. 在任意输入框轻按 `Fn`，开始第一句话。
+
+安装包自带运行组件，无需开发工具。**此版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Knock，点击“仍要打开”。详见[安装指引](docs/INSTALL.md)。
+
+模型权重按需下载。没有配置文字服务时，自动整理默认关闭，普通本地听写可先使用。翻译、问答和上下文听写需要在“设置 → 服务配置”填写服务地址、API Key 与模型名称。服务必须兼容 Chat Completions；截图校对还需要支持图片输入。
+
+### 从源码构建
+
+需要 Xcode 命令行工具、CMake 和 Python 3.9 或更新版本。
 
 ```sh
 git clone https://github.com/Yikehaodan/Knock.git
@@ -38,16 +57,7 @@ cd Knock
 zsh scripts/setup.sh
 ```
 
-脚本先检查依赖，再构建 `Knock.app`。缺少依赖时会给出安装方法。首次构建需要访问 GitHub 和 PyPI；下载缓存可供下次构建复用，不会修改系统 Python 包。
-
-1. 把 `Knock.app` 拖入“应用程序”，再打开。
-2. 按首次引导设置麦克风与辅助功能权限。屏幕录制可选。
-3. 在“设置 → 语音模型”中下载一个模型。中文听写可先选 Zipformer，多语言可选 Whisper 或 SenseVoice。
-4. 在任意输入框轻按 `Fn`，开始第一句话。
-
-首次构建不下载模型权重。没有配置文字服务时，自动整理默认关闭，普通本地听写可先使用。翻译、问答和上下文听写需要在“设置 → 服务配置”填写服务地址、API Key 与模型名称。服务必须兼容 Chat Completions；截图校对还需要支持图片输入。
-
-详见[构建与配置](docs/SETUP.md)。源码构建默认使用临时签名，尚未经过 Apple 公证；重新构建后可能需要重新授权。
+脚本先检查依赖，再构建 `Knock.app`。缺少依赖时会给出安装方法。首次构建需要访问 GitHub 和 PyPI；下载缓存可供下次构建复用，不会修改系统 Python 包。详见[构建与配置](docs/SETUP.md)。
 
 ## 让模型适合你的 Mac
 
@@ -93,6 +103,7 @@ Agent 入口是产品方向。当前版本没有通用任务执行、任意电�
 zsh scripts/doctor.sh   # 检查构建环境
 zsh source/build.sh     # 增量构建
 zsh scripts/test.sh     # 隔离测试，不需要真实密钥、麦克风或大模型
+zsh scripts/package.sh  # 构建 DMG 安装包与 SHA-256 校验文件
 ```
 
 源码位于 `source/`，测试位于 `tests/`。模型来源、文件大小和 SHA-256 校验值记录在 `source/speech-runtime/models.json`。运行组件与第三方代码的许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -23,3 +23,4 @@ __pycache__/
 /tests/**/*.jsonl
 /tests/**/*-results.json
 /previews/
+/dist/

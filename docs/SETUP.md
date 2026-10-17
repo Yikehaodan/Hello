@@ -1,5 +1,7 @@
 # 构建与配置
 
+只想使用 Knock，可直接下载 [Release 安装包](https://github.com/Yikehaodan/Knock/releases/latest)，按[安装指引](INSTALL.md)操作，无需以下开发工具。
+
 ## 环境
 
 需要 Apple Silicon Mac、macOS 14 或更新版本、Xcode 命令行工具、CMake，以及 Python 3.9 或更新版本。当前构建目标为 arm64。
@@ -76,3 +78,9 @@ KNOCK_MODELS_DIR="/Volumes/Models/Knock" ./Knock.app/Contents/MacOS/Knock
 构建产物默认使用临时签名，尚未经过 Apple 公证。请在固定位置运行应用，授权问题参见 [macOS 权限](PERMISSIONS.md)。
 
 高级搜索适配器读取配置目录中的 `search.json`，它面向特定搜索协议，不是通用搜索 API。普通听写与翻译不依赖它。构建默认不会读取本机搜索配置；仅显式设置 `KNOCK_SEARCH_CONFIG` 时，为指定 HTTP 搜索主机生成单独的网络例外。
+
+## 打包发布
+
+在干净的源码目录运行 `zsh scripts/package.sh`，脚本会构建应用、验证签名，并生成 `dist/Knock-<版本>-macOS-arm64.dmg` 和对应 `.sha256` 文件。DMG 包含应用、“应用程序”快捷方式与安装说明。生成目录不会提交到 Git。
+
+脚本拒绝包含旧模型或额外顶层资源的应用包，也不接受私人搜索配置。它不会执行 Apple 公证；默认临时签名的产物需要在 Release 中说明首次打开要求。`CODE_SIGN_IDENTITY` 只指定构建签名身份，不代表已完成公证。
