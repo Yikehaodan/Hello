@@ -9,7 +9,7 @@
 </p>
 <p align="center"><strong>轻叩，开口。</strong><br/>把声音带进你正在使用的应用。</p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg"><img src="https://img.shields.io/badge/下载_Knock_for_macOS-v0.9.0-B8EFCC?style=for-the-badge&amp;logo=apple&amp;logoColor=183D32&amp;labelColor=183D32" alt="下载 Knock v0.9.0 for macOS" /></a>
+  <a href="https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Knock v0.9.0 for macOS" /></a>
 </p>
 <p align="center"><sub>Apple Silicon · macOS 14+ · 首个公开预览版 · 尚未经过 Apple 公证</sub></p>
 <p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Knock/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
