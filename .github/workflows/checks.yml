@@ -1,0 +1,13 @@
+name: macOS checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolated tests (no credentials or model downloads)
+        run: zsh scripts/test.sh
