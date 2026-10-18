@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Hello — Say Hello. Make it happen." width="100%" />
+  <img src="docs/assets/hero.svg" alt="Hello：按下 Fn，把想法说出来。听写、翻译、上下文听写与语音问答。" width="100%" />
 </p>
 <p align="center">
   <a href="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml"><img src="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml/badge.svg" alt="macOS checks" /></a>
@@ -7,51 +7,84 @@
   <img src="https://img.shields.io/badge/Apple_Silicon-only-B8EFCC?style=flat-square&amp;labelColor=183D32" alt="Apple Silicon only" />
   <img src="https://img.shields.io/badge/Swift-native-F2F5ED?style=flat-square&amp;logo=swift&amp;labelColor=183D32" alt="Native Swift" />
 </p>
-<p align="center"><strong>开口，说声 Hello。</strong><br/>把声音带进你正在使用的应用。</p>
+<p align="center"><strong>开口，说声 Hello。</strong><br/>在你正在使用的应用里，听写、翻译、提问。</p>
 <p align="center">
   <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.2 for macOS" /></a>
 </p>
 <p align="center"><sub>Apple Silicon · macOS 14+ · 公开预览版 · 尚未经过 Apple 公证</sub></p>
-<p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
+<p align="center"><a href="#四种方式用声音完成输入">功能介绍</a> · <a href="#下载安装">下载安装</a> · <a href="docs/INSTALL.md">安装帮助</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a></p>
 
-## 一句话，接着做
+Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开始说话，再按一次，识别后的文字就会填入原来的位置。写消息、记想法、组织长段文字，都可以从开口开始。
 
-Hello 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一次，文字就会回到光标所在的位置。它希望成为人与 Agent 之间的入口，目前提供听写、翻译、上下文听写和语音问答。
+## 四种方式，用声音完成输入
 
-**目前仅支持 Apple Silicon Mac，系统要求 macOS 14 或更新版本。** 界面使用简体中文。Intel Mac、Windows 和 Linux 暂不支持。
+<p align="center"><img src="docs/assets/features.svg" alt="四种功能示例：口述转文字、中文翻译成英文、结合页面校对口述，以及通过语音改写选中文字。" width="100%" /></p>
+<p align="center"><sub>功能示意，示例输出用于说明用法；实际结果取决于所选模型与服务。</sub></p>
 
-| 你想做什么 | 快捷键 | Hello 会做什么 |
+| 功能 | 快捷键 | 用法 |
 | --- | --- | --- |
-| 口述文字 | `Fn` | 把声音转成文字，可整理标点、重复和改口 |
-| 换一种语言表达 | `Fn + Shift` | 将完整口述翻译成目标语言 |
-| 结合正在看的页面听写 | `Fn + Control` | 参考当前输入框和可选截图，校对口述 |
-| 提问或修改选中文字 | `Fn + Space` | 显示回答，或在条件允许时替换选中文字 |
+| 听写 | `Fn` | 把口述变成文字。可开启自动整理，处理标点、重复和改口。 |
+| 翻译 | `Fn + Shift` | 用熟悉的语言说话，按设定的目标语言输出。 |
+| 上下文听写 | `Fn + Control` | 参考当前输入框和可选的窗口截图，校对口述中的术语、姓名与数字。 |
+| 问一问 | `Fn + Space` | 直接提问并查看回答；也可以选中文字，再说出改写要求。 |
 
-再次按 `Fn` 结束录音，`Esc` 取消。`Control + Command + V` 输入上次结果。每次录音最多 2 分钟。
+再次按 `Fn` 结束录音，`Esc` 取消。`Control + Command + V` 输入上次结果。每次录音最多 2 分钟。改写选文时，Hello 会检查原来的选区是否仍可写入；无法写入时可手动复制结果。
 
-<p align="center"><img src="docs/assets/home.png" alt="Hello 主界面，展示四种语音模式" width="940" /></p>
-<p align="center"><sub>实际 SwiftUI 视图渲染，使用演示数据。</sub></p>
+**普通本地听写无需 API Key。** 自动整理、翻译、上下文听写和问答需要配置文字服务，截图校对还需要服务支持图片输入。配置方法见[服务配置](docs/SETUP.md#文字服务)。
 
-## 开始使用
+### 常用的词和说过的话，也能留下来
 
-Hello 原名 Knock。从旧版升级会保留本机数据与模型，详见[安装指引](docs/INSTALL.md)。
+把人名、产品名和专业词加入个人词典，供文字处理时参考。历史记录支持搜索、查看识别原文、回放录音和重新处理；可用内容取决于本机保留设置。
 
-### 直接下载安装
+<details>
+<summary>查看历史记录界面</summary>
 
-**[下载 Hello v0.9.2 安装包（DMG）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Hello/releases/tag/v0.9.2)
+<p align="center"><img src="docs/assets/history.png" alt="Hello 历史记录界面：搜索记录、查看原文、复制结果和查看上下文截图。" width="940" /></p>
+<p align="center"><sub>v0.9.2 实际应用视图，使用演示数据。</sub></p>
 
-1. 打开 DMG，把 `Hello.app` 拖入 `Applications`，从“应用程序”启动。
-2. 按首次引导设置麦克风与辅助功能权限。屏幕录制可选。
-3. 在“设置 → 语音模型”中下载并选择一个模型。中文听写可先选 Zipformer，多语言可选 Whisper 或 SenseVoice。
-4. 在任意输入框轻按 `Fn`，开始第一句话。
+</details>
 
-安装包自带运行组件，无需开发工具。**此版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Hello，点击“仍要打开”。详见[安装指引](docs/INSTALL.md)。
+## 下载安装
 
-模型权重按需下载。没有配置文字服务时，自动整理默认关闭，普通本地听写可先使用。翻译、问答和上下文听写需要在“设置 → 服务配置”填写服务地址、API Key 与模型名称。服务必须兼容 Chat Completions；截图校对还需要支持图片输入。
+**[下载 Hello v0.9.2（macOS 安装包）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg)**
 
-### 从源码构建
+支持 Apple Silicon Mac（M 系列芯片），需要 macOS 14 或更新版本。界面为简体中文。目前不支持 Intel Mac、Windows 和 Linux。
 
-需要 Xcode 命令行工具、CMake 和 Python 3.9 或更新版本。
+1. 打开下载的 DMG，将 `Hello.app` 拖到 `Applications`，再从“应用程序”启动。
+2. 按首次引导设置麦克风与辅助功能权限。屏幕录制仅用于可选的窗口截图。
+3. 在“设置 → 语音模型”中下载并选择模型。中文听写可以先用 Zipformer；其他模型见[模型说明](docs/MODELS.md)。
+4. 把光标放入输入框，轻按 `Fn`，开始第一次听写。
+
+安装包已包含运行组件，无需安装开发工具。模型权重按需下载，支持暂停、继续和校验。需要翻译等功能时，在“设置 → 服务配置”填写服务地址、API Key 和模型名称。
+
+**当前版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认下载来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Hello，点击“仍要打开”。具体步骤见[安装帮助](docs/INSTALL.md)。
+
+更新时先退出旧版，再用新版替换应用。本机模型、词典和历史会保留；系统可能要求重新授予权限。从 Knock 升级的说明也在[安装帮助](docs/INSTALL.md#更新与卸载)中。
+
+## 权限与数据
+
+| 权限 | 用途 |
+| --- | --- |
+| 麦克风 | 主动开始录音后收音。 |
+| 辅助功能 | 使用全局快捷键、读取输入框或选文，并写回文字。 |
+| 屏幕录制，可选 | 上下文听写时获取当前窗口截图；新安装默认关闭截图。 |
+
+本地语音模型在 Mac 上处理录音。选择云端语音后，录音会发送到对应服务。使用文字服务时，相关文字会发送到你配置的服务；上下文听写还可能发送输入框内容、窗口标题和截图。
+
+权限可以之后在设置中补充，详细用途、未授权时的用法和数据保留说明见[权限与数据](docs/PERMISSIONS.md)。
+
+## 帮助与反馈
+
+- [安装与更新](docs/INSTALL.md)：首次打开、版本替换、下载文件校验。
+- [模型管理](docs/MODELS.md)：选择模型、下载失败、导入已有权重。
+- [服务配置](docs/SETUP.md#文字服务)：接入文字服务和可选的云端语音。
+- [反馈问题](https://github.com/Yikehaodan/Hello/issues)：请附 macOS 版本、芯片型号、模型和复现步骤，勿附密钥或私人录音。
+
+Hello 希望成为人与 Agent 交流的入口，当前版本专注于语音输入与问答。
+
+## 从源码构建
+
+需要 Apple Silicon Mac、macOS 14+、Xcode 命令行工具、CMake 和 Python 3.9+。
 
 ```sh
 git clone https://github.com/Yikehaodan/Hello.git
@@ -59,55 +92,4 @@ cd Hello
 zsh scripts/setup.sh
 ```
 
-脚本先检查依赖，再构建 `Hello.app`。缺少依赖时会给出安装方法。首次构建需要访问 GitHub 和 PyPI；下载缓存可供下次构建复用，不会修改系统 Python 包。详见[构建与配置](docs/SETUP.md)。
-
-## 让模型适合你的 Mac
-
-| 模型 | 适用场景 | 模型大小 |
-| --- | --- | --- |
-| Zipformer | 中文，边录边识别 | 约 167 MB |
-| SenseVoice | 中、英、日、韩和粤语 | 约 240 MB |
-| Whisper | 本地多语言听写 | 约 574 MB |
-| Qwen3-ASR 0.6B | 本地多语言识别 | 约 1.88 GB |
-| Qwen3-ASR 轻量版 | 本地量化版本 | 约 542 MB，首次需下载约 1.88 GB 再转换 |
-| 豆包云端 | 联网流式识别 | 需单独配置服务密钥 |
-
-模型在应用内按需下载，支持暂停、继续和文件校验。可用命令行提前下载、校验或导入已有权重。下载失败不会把不完整的文件标记为可用。详见[模型管理](docs/MODELS.md)。
-
-## 权限有用途，数据有去向
-
-| 权限 | 用途 | 未授权时 |
-| --- | --- | --- |
-| 麦克风 | 主动开始录音后收音 | 可使用文本工作台 |
-| 辅助功能 | 全局快捷键、读取输入框或选文、写回文字 | 可用窗口按钮录音，手动复制结果 |
-| 屏幕录制，可选 | 上下文听写时截取当前窗口 | 普通听写、翻译和提问仍可使用 |
-
-新安装默认关闭窗口截图。开启截图选项并获得系统授权后，上下文听写才会截图。权限引导可跳过，之后从“设置 → 权限”继续配置。
-
-<p align="center"><img src="docs/assets/permissions.png" alt="Hello 首次启动的 macOS 权限说明" width="540" /></p>
-
-本地模型在 Mac 上处理录音。选择云端语音后，录音会发送到对应服务。自动整理、翻译和问答会将相关文字发送到配置的文字服务；上下文听写还可能发送当前输入框、窗口标题和截图。历史、录音和截图按本机保留设置保存。
-
-完整说明见[权限与数据](docs/PERMISSIONS.md)。
-
-## 已经能做什么
-
-- 原生菜单栏应用、录音浮条、浅色与深色外观。
-- 本地或云端识别、个人词典、跨应用文字输入。
-- 搜索历史、查看识别原文、录音回放与重新处理。
-- 权限状态检查、首次使用引导、可配置的文字服务。
-
-Agent 入口是产品方向。当前版本没有通用任务执行、任意电脑操作或多 Agent 编排能力。问答中的联网搜索需要额外配置适配服务；天气查询使用 Open-Meteo。
-
-## 开发
-
-```sh
-zsh scripts/doctor.sh   # 检查构建环境
-zsh source/build.sh     # 增量构建
-zsh scripts/test.sh     # 隔离测试，不需要真实密钥、麦克风或大模型
-zsh scripts/package.sh  # 构建 DMG 安装包与 SHA-256 校验文件
-```
-
-源码位于 `source/`，测试位于 `tests/`。模型来源、文件大小和 SHA-256 校验值记录在 `source/speech-runtime/models.json`。运行组件与第三方代码的许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-提交问题时请附 macOS 版本、芯片型号、选用模型和复现步骤，勿附 API Key、私人录音或未经处理的窗口截图。
+构建、测试和打包方法见[开发文档](docs/SETUP.md)，第三方组件说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

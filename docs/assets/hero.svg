@@ -1,21 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="660" viewBox="0 0 1600 660">
-<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#102e29"/><stop offset="1" stop-color="#071b19"/></linearGradient><radialGradient id="glow"><stop stop-color="#9de7ba" stop-opacity=".18"/><stop offset="1" stop-color="#9de7ba" stop-opacity="0"/></radialGradient></defs>
-<rect width="1600" height="660" rx="28" fill="url(#bg)"/>
-<circle cx="1210" cy="330" r="420" fill="url(#glow)"/>
-<g fill="none" stroke="#b8efcc" stroke-opacity=".12"><circle cx="1210" cy="330" r="240"/><circle cx="1210" cy="330" r="300"/><circle cx="1210" cy="330" r="360"/></g>
-<g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif">
-<rect x="92" y="80" width="200" height="36" rx="18" fill="#b8efcc" fill-opacity=".09" stroke="#b8efcc" stroke-opacity=".3"/>
-<circle cx="114" cy="98" r="4" fill="#b8efcc"/><text x="130" y="104" fill="#b8efcc" font-size="14" letter-spacing="2">BUILT FOR macOS</text>
-<text x="86" y="279" fill="#f2f5ed" font-size="142" font-weight="650" letter-spacing="-7">Hello</text>
-<text x="94" y="351" fill="#b8efcc" font-size="34" letter-spacing="-.5">Say Hello. Make it happen.</text>
-<text x="96" y="410" fill="#a6bdb3" font-size="22">Speak, write, translate, and ask — right where you work.</text>
-<g font-size="14" letter-spacing="1" fill="#c4d5cd"><text x="96" y="563">NATIVE SWIFT</text><circle cx="263" cy="558" r="2"/><text x="287" y="563">LOCAL OR CLOUD</text><circle cx="483" cy="558" r="2"/><text x="507" y="563">ONE Fn AWAY</text></g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="560" viewBox="0 0 1440 560" role="img" aria-labelledby="title">
+<title id="title">Hello：按下 Fn，把想法说出来。适用于 macOS 的听写、翻译与语音问答工具。</title>
+<g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+<rect x="0" y="0" width="1440" height="560" rx="32" fill="#112e28" stroke="none"/>
+<circle cx="1300" cy="40" r="300" fill="#b8efcc" opacity=".035"/>
+<rect x="64" y="54" width="214" height="36" rx="18" fill="#23483c" stroke="none"/>
+<text x="84" y="78" font-size="16" fill="#c7edce" font-weight="500">macOS · Apple Silicon</text>
+<text x="60" y="197" font-size="108" fill="#f2f8ee" font-weight="650">Hello</text>
+<text x="66" y="267" font-size="38" fill="#d1f1d3" font-weight="600">按下 Fn，把想法说出来。</text>
+<text x="67" y="319" font-size="26" fill="#acbeb5" font-weight="400">写消息、换种语言、问个问题。</text>
+<text x="67" y="359" font-size="26" fill="#acbeb5" font-weight="400">从你正在使用的输入框开始。</text>
+<rect x="66" y="440" width="112" height="48" rx="24" fill="#23473c" stroke="none"/>
+<text x="91" y="472" font-size="22" fill="#d4efda" font-weight="500">听写</text>
+<rect x="190" y="440" width="112" height="48" rx="24" fill="#23473c" stroke="none"/>
+<text x="215" y="472" font-size="22" fill="#d4efda" font-weight="500">翻译</text>
+<rect x="314" y="440" width="180" height="48" rx="24" fill="#23473c" stroke="none"/>
+<text x="339" y="472" font-size="22" fill="#d4efda" font-weight="500">上下文听写</text>
+<rect x="506" y="440" width="132" height="48" rx="24" fill="#23473c" stroke="none"/>
+<text x="531" y="472" font-size="22" fill="#d4efda" font-weight="500">问一问</text>
+<rect x="756" y="62" width="620" height="430" rx="28" fill="#f4f7ef" stroke="none"/>
+<text x="790" y="108" font-size="22" fill="#506e60" font-weight="500">一次口述，一段文字</text>
+<rect x="790" y="136" width="552" height="96" rx="18" fill="#e7ece2" stroke="none"/>
+<text x="816" y="173" font-size="18" fill="#64756a" font-weight="400">你说</text>
+<text x="816" y="210" font-size="25" fill="#23473c" font-weight="400">明天下午三点，我们讨论新版设计。</text>
+<rect x="790" y="258" width="552" height="112" rx="18" fill="#d9efda" stroke="none"/>
+<text x="816" y="294" font-size="18" fill="#536e5a" font-weight="400">输入框</text>
+<text x="816" y="335" font-size="25" fill="#23473c" font-weight="400">明天下午 3 点，我们讨论新版设计。</text>
+<path d="M1305 311v29" stroke="#466c54" stroke-width="2"/>
+<rect x="790" y="400" width="58" height="48" rx="12" fill="#fff" stroke="#d5dfd2"/>
+<text x="807" y="432" font-size="24" fill="#244e40" font-weight="600">Fn</text>
+<text x="865" y="431" font-size="20" fill="#5b7263" font-weight="400">开始 / 结束录音</text>
+<text x="1234" y="464" font-size="16" fill="#788779" font-weight="400">功能示意</text>
 </g>
-<g transform="translate(925 60) scale(.56)">
-<g stroke-linecap="round" stroke-linejoin="round">
-<path d="M360 250H600C710 250 780 320 780 430V490C780 600 710 670 600 670H420L265 780C245 792 245 782 248 766L270 654C190 620 160 550 160 460V430C160 320 235 250 360 250Z" fill="#d7f7d8"/>
-<g fill="#244e43"><rect x="365" y="400" width="38" height="62" rx="19"/><rect x="535" y="400" width="38" height="62" rx="19"/></g>
-<path d="M405 524C443 578 507 578 545 524" fill="none" stroke="#244e43" stroke-width="28"/>
-<path d="M706 190L718 153M773 222L806 191M815 282L857 269" fill="none" stroke="#b8efcc" stroke-width="22"/>
-</g>
-</g></svg>
+</svg>

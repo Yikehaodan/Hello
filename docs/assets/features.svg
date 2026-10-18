@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="910" viewBox="0 0 1440 910" role="img" aria-labelledby="title">
+<title id="title">Hello 四种功能与快捷键示例</title>
+<g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,PingFang SC,Microsoft YaHei,sans-serif">
+<rect x="0" y="0" width="1440" height="910" rx="28" fill="#f3f5ef" stroke="none"/>
+<text x="44" y="67" font-size="36" fill="#1e4437" font-weight="600">说出来，然后继续手头的事。</text>
+<text x="46" y="110" font-size="24" fill="#6c7a6c" font-weight="400">四种模式，对应不同的输入需求</text>
+<rect x="32" y="142" width="672" height="354" rx="24" fill="#ffffff" stroke="#dfe5d9"/>
+<text x="58" y="187" font-size="18" fill="#8c9e8c" font-weight="600">01</text>
+<text x="98" y="189" font-size="30" fill="#244e40" font-weight="600">听写</text>
+<rect x="610" y="160" width="68" height="40" rx="12" fill="#eef3e9" stroke="none"/>
+<text x="624" y="187" font-size="21" fill="#41664d" font-weight="500">Fn</text>
+<text x="58" y="229" font-size="24" fill="#677969" font-weight="400">把口述变成可用的文字。</text>
+<text x="58" y="274" font-size="18" fill="#7a887b" font-weight="400">你说</text>
+<text x="58" y="311" font-size="25" fill="#3e5244" font-weight="400">明天下午三点，讨论新版设计。</text>
+<rect x="52" y="332" width="632" height="112" rx="16" fill="#eef5e9" stroke="none"/>
+<text x="68" y="361" font-size="18" fill="#6e826f" font-weight="400">输入结果</text>
+<text x="68" y="394" font-size="26" fill="#244e40" font-weight="500">明天下午 3 点，讨论新版设计。</text>
+<text x="59" y="474" font-size="18" fill="#7a887b" font-weight="400">本地听写无需 API Key</text>
+<rect x="736" y="142" width="672" height="354" rx="24" fill="#ffffff" stroke="#dfe5d9"/>
+<text x="762" y="187" font-size="18" fill="#8c9e8c" font-weight="600">02</text>
+<text x="802" y="189" font-size="30" fill="#244e40" font-weight="600">翻译</text>
+<rect x="1226" y="160" width="156" height="40" rx="12" fill="#eef3e9" stroke="none"/>
+<text x="1240" y="187" font-size="21" fill="#41664d" font-weight="500">Fn + Shift</text>
+<text x="762" y="229" font-size="24" fill="#677969" font-weight="400">说中文，也可以输出英文。</text>
+<text x="762" y="274" font-size="18" fill="#7a887b" font-weight="400">你说</text>
+<text x="762" y="311" font-size="25" fill="#3e5244" font-weight="400">请把会议改到周四下午三点。</text>
+<rect x="756" y="332" width="632" height="112" rx="16" fill="#eef5e9" stroke="none"/>
+<text x="772" y="361" font-size="18" fill="#6e826f" font-weight="400">目标语言：英语</text>
+<text x="772" y="394" font-size="26" fill="#244e40" font-weight="500">Please move the meeting</text>
+<text x="772" y="426" font-size="26" fill="#244e40" font-weight="500">to Thursday at 3 PM.</text>
+<text x="763" y="474" font-size="18" fill="#7a887b" font-weight="400">需要配置文字服务</text>
+<rect x="32" y="524" width="672" height="354" rx="24" fill="#ffffff" stroke="#dfe5d9"/>
+<text x="58" y="569" font-size="18" fill="#8c9e8c" font-weight="600">03</text>
+<text x="98" y="571" font-size="30" fill="#244e40" font-weight="600">上下文听写</text>
+<rect x="496" y="542" width="182" height="40" rx="12" fill="#eef3e9" stroke="none"/>
+<text x="510" y="569" font-size="21" fill="#41664d" font-weight="500">Fn + Control</text>
+<text x="58" y="611" font-size="24" fill="#677969" font-weight="400">参考当前页面，校对口述。</text>
+<text x="58" y="656" font-size="18" fill="#7a887b" font-weight="400">当前页面 / 口述</text>
+<text x="58" y="693" font-size="25" fill="#3e5244" font-weight="400">预算草稿 / 金额改为四千五百元。</text>
+<rect x="52" y="714" width="632" height="112" rx="16" fill="#eef5e9" stroke="none"/>
+<text x="68" y="743" font-size="18" fill="#6e826f" font-weight="400">输入结果</text>
+<text x="68" y="776" font-size="26" fill="#244e40" font-weight="500">金额改为 4500 元。</text>
+<text x="59" y="856" font-size="18" fill="#7a887b" font-weight="400">需要文字服务；窗口截图可选</text>
+<rect x="736" y="524" width="672" height="354" rx="24" fill="#ffffff" stroke="#dfe5d9"/>
+<text x="762" y="569" font-size="18" fill="#8c9e8c" font-weight="600">04</text>
+<text x="802" y="571" font-size="30" fill="#244e40" font-weight="600">问一问</text>
+<rect x="1212" y="542" width="170" height="40" rx="12" fill="#eef3e9" stroke="none"/>
+<text x="1226" y="569" font-size="21" fill="#41664d" font-weight="500">Fn + Space</text>
+<text x="762" y="611" font-size="24" fill="#677969" font-weight="400">提问，或说出对选文的修改要求。</text>
+<text x="762" y="656" font-size="18" fill="#7a887b" font-weight="400">选中“今天下班前发我”后说</text>
+<text x="762" y="693" font-size="25" fill="#3e5244" font-weight="400">帮我把这句话改得更礼貌。</text>
+<rect x="756" y="714" width="632" height="112" rx="16" fill="#eef5e9" stroke="none"/>
+<text x="772" y="743" font-size="18" fill="#6e826f" font-weight="400">示例改写</text>
+<text x="772" y="776" font-size="26" fill="#244e40" font-weight="500">麻烦你在今天下班前发给我，</text>
+<text x="772" y="808" font-size="26" fill="#244e40" font-weight="500">谢谢。</text>
+<text x="763" y="856" font-size="18" fill="#7a887b" font-weight="400">需要配置文字服务</text>
+</g>
+</svg>
