@@ -1,26 +1,26 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Knock — Your voice. A door to more." width="100%" />
+  <img src="docs/assets/hero.svg" alt="Hello — Your voice. A door to more." width="100%" />
 </p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Knock/actions/workflows/checks.yml"><img src="https://github.com/Yikehaodan/Knock/actions/workflows/checks.yml/badge.svg" alt="macOS checks" /></a>
+  <a href="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml"><img src="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml/badge.svg" alt="macOS checks" /></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-183D32?style=flat-square&amp;logo=apple&amp;logoColor=white" alt="macOS 14 or newer" />
   <img src="https://img.shields.io/badge/Apple_Silicon-only-B8EFCC?style=flat-square&amp;labelColor=183D32" alt="Apple Silicon only" />
   <img src="https://img.shields.io/badge/Swift-native-F2F5ED?style=flat-square&amp;logo=swift&amp;labelColor=183D32" alt="Native Swift" />
 </p>
-<p align="center"><strong>轻叩，开口。</strong><br/>把声音带进你正在使用的应用。</p>
+<p align="center"><strong>开口，说声 Hello。</strong><br/>把声音带进你正在使用的应用。</p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Knock v0.9.0 for macOS" /></a>
+  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.1/Hello-0.9.1-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.1 for macOS" /></a>
 </p>
-<p align="center"><sub>Apple Silicon · macOS 14+ · 首个公开预览版 · 尚未经过 Apple 公证</sub></p>
-<p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Knock/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
+<p align="center"><sub>Apple Silicon · macOS 14+ · 公开预览版 · 尚未经过 Apple 公证</sub></p>
+<p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
 
 ## 一句话，接着做
 
-Knock 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一次，文字就会回到光标所在的位置。它希望成为人与 Agent 之间的入口，目前提供听写、翻译、上下文听写和语音问答。
+Hello 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一次，文字就会回到光标所在的位置。它希望成为人与 Agent 之间的入口，目前提供听写、翻译、上下文听写和语音问答。
 
 **目前仅支持 Apple Silicon Mac，系统要求 macOS 14 或更新版本。** 界面使用简体中文。Intel Mac、Windows 和 Linux 暂不支持。
 
-| 你想做什么 | 快捷键 | Knock 会做什么 |
+| 你想做什么 | 快捷键 | Hello 会做什么 |
 | --- | --- | --- |
 | 口述文字 | `Fn` | 把声音转成文字，可整理标点、重复和改口 |
 | 换一种语言表达 | `Fn + Shift` | 将完整口述翻译成目标语言 |
@@ -29,21 +29,23 @@ Knock 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一�
 
 再次按 `Fn` 结束录音，`Esc` 取消。`Control + Command + V` 输入上次结果。每次录音最多 2 分钟。
 
-<p align="center"><img src="docs/assets/home.png" alt="Knock 主界面，展示四种语音模式" width="940" /></p>
+<p align="center"><img src="docs/assets/home.png" alt="Hello 主界面，展示四种语音模式" width="940" /></p>
 <p align="center"><sub>实际 SwiftUI 视图渲染，使用演示数据。</sub></p>
 
 ## 开始使用
 
+Hello 原名 Knock。从旧版升级会保留本机数据与模型，详见[安装指引](docs/INSTALL.md)。
+
 ### 直接下载安装
 
-**[下载 Knock v0.9.0 安装包（DMG）](https://github.com/Yikehaodan/Knock/releases/download/v0.9.0/Knock-0.9.0-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Knock/releases/tag/v0.9.0)
+**[下载 Hello v0.9.1 安装包（DMG）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.1/Hello-0.9.1-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Hello/releases/tag/v0.9.1)
 
-1. 打开 DMG，把 `Knock.app` 拖入 `Applications`，从“应用程序”启动。
+1. 打开 DMG，把 `Hello.app` 拖入 `Applications`，从“应用程序”启动。
 2. 按首次引导设置麦克风与辅助功能权限。屏幕录制可选。
 3. 在“设置 → 语音模型”中下载并选择一个模型。中文听写可先选 Zipformer，多语言可选 Whisper 或 SenseVoice。
 4. 在任意输入框轻按 `Fn`，开始第一句话。
 
-安装包自带运行组件，无需开发工具。**此版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Knock，点击“仍要打开”。详见[安装指引](docs/INSTALL.md)。
+安装包自带运行组件，无需开发工具。**此版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Hello，点击“仍要打开”。详见[安装指引](docs/INSTALL.md)。
 
 模型权重按需下载。没有配置文字服务时，自动整理默认关闭，普通本地听写可先使用。翻译、问答和上下文听写需要在“设置 → 服务配置”填写服务地址、API Key 与模型名称。服务必须兼容 Chat Completions；截图校对还需要支持图片输入。
 
@@ -52,12 +54,12 @@ Knock 是一个原生 macOS 语音工具。轻按 Fn，说出想法，再按一�
 需要 Xcode 命令行工具、CMake 和 Python 3.9 或更新版本。
 
 ```sh
-git clone https://github.com/Yikehaodan/Knock.git
-cd Knock
+git clone https://github.com/Yikehaodan/Hello.git
+cd Hello
 zsh scripts/setup.sh
 ```
 
-脚本先检查依赖，再构建 `Knock.app`。缺少依赖时会给出安装方法。首次构建需要访问 GitHub 和 PyPI；下载缓存可供下次构建复用，不会修改系统 Python 包。详见[构建与配置](docs/SETUP.md)。
+脚本先检查依赖，再构建 `Hello.app`。缺少依赖时会给出安装方法。首次构建需要访问 GitHub 和 PyPI；下载缓存可供下次构建复用，不会修改系统 Python 包。详见[构建与配置](docs/SETUP.md)。
 
 ## 让模型适合你的 Mac
 
@@ -82,7 +84,7 @@ zsh scripts/setup.sh
 
 新安装默认关闭窗口截图。开启截图选项并获得系统授权后，上下文听写才会截图。权限引导可跳过，之后从“设置 → 权限”继续配置。
 
-<p align="center"><img src="docs/assets/permissions.png" alt="Knock 首次启动的 macOS 权限说明" width="540" /></p>
+<p align="center"><img src="docs/assets/permissions.png" alt="Hello 首次启动的 macOS 权限说明" width="540" /></p>
 
 本地模型在 Mac 上处理录音。选择云端语音后，录音会发送到对应服务。自动整理、翻译和问答会将相关文字发送到配置的文字服务；上下文听写还可能发送当前输入框、窗口标题和截图。历史、录音和截图按本机保留设置保存。
 

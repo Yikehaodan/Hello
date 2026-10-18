@@ -2,7 +2,7 @@
 from pathlib import Path
 import shutil
 ROOT = Path(__file__).resolve().parent.parent
-DEST = ROOT / '.publish' / 'Knock'
+DEST = ROOT / '.publish' / 'Hello'
 DEST.mkdir(parents=True, exist_ok=True)
 for name in ('source', 'vendor', 'scripts', 'examples', 'docs', '.github'):
     shutil.copytree(ROOT / name, DEST / name, dirs_exist_ok=True,

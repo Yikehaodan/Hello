@@ -39,9 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let mainMenu = NSMenu()
         let appItem = NSMenuItem(); let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "打开Knock", action: #selector(show), keyEquivalent: "0").target = self
+        appMenu.addItem(withTitle: "打开Hello", action: #selector(show), keyEquivalent: "0").target = self
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出Knock", action: #selector(quit), keyEquivalent: "q").target = self
+        appMenu.addItem(withTitle: "退出Hello", action: #selector(quit), keyEquivalent: "q").target = self
         appItem.submenu = appMenu; mainMenu.addItem(appItem)
         let editItem = NSMenuItem(title: "编辑", action: nil, keyEquivalent: "")
         let editMenu = NSMenu(title: "编辑")
@@ -52,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu; mainMenu.addItem(editItem); NSApp.mainMenu = mainMenu
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 750), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "Knock"; window.isReleasedWhenClosed = false
+        window.title = "Hello"; window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
         window.minSize = NSSize(width: 1000, height: 700)
         window.contentView = NSHostingView(rootView: MainView(model: model, enableShortcut: { [weak self] in self?.shortcut.requestPermission() }))
@@ -63,14 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; hud.ignoresMouseEvents = false
         hud.contentView = NSHostingView(rootView: RecordingHUD(model: model))
         answer = AnswerPanel(contentRect: NSRect(x: 0, y: 0, width: 800, height: 488), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        answer.title = "Knock · 回答"; answer.isReleasedWhenClosed = false
+        answer.title = "Hello · 回答"; answer.isReleasedWhenClosed = false
         answer.isOpaque = false; answer.backgroundColor = .clear; answer.hasShadow = false
         answer.level = .floating; answer.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         answer.contentView = NSHostingView(rootView: AnswerView(model: model))
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Knock")
+        item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Hello")
         let menu = NSMenu()
-        menu.addItem(withTitle: "打开Knock", action: #selector(show), keyEquivalent: "")
+        menu.addItem(withTitle: "打开Hello", action: #selector(show), keyEquivalent: "")
         menu.addItem(withTitle: "开始 / 结束录音  Fn", action: #selector(toggle), keyEquivalent: "")
         menu.addItem(withTitle: "语音翻译  Fn ⇧", action: #selector(translate), keyEquivalent: "")
         menu.addItem(withTitle: "上下文听写  Fn ⌃", action: #selector(contextDictate), keyEquivalent: "")

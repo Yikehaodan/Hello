@@ -31,7 +31,7 @@ struct ServiceSettingsView: View {
             }
             Divider()
             Text("豆包云端语音（可选）").font(.headline)
-            Text("在配置目录放入 doubao.env，填写 DOUBAO_API_KEY，然后重新打开 Knock。未配置时使用本地模型。配置示例见仓库 examples 目录。")
+            Text("在配置目录放入 doubao.env，填写 DOUBAO_API_KEY，然后重新打开 Hello。未配置时使用本地模型。配置示例见仓库 examples 目录。")
                 .font(.system(size: 13)).foregroundStyle(.secondary)
             Text("配置目录").font(.headline)
             Text(AppPaths.data.path).font(.system(size: 11, design: .monospaced)).textSelection(.enabled)

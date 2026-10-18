@@ -1,6 +1,6 @@
 # Third-party components
 
-Knock includes or downloads components with their own licenses. Model weights are downloaded separately; their upstream terms apply.
+Hello includes or downloads components with their own licenses. Model weights are downloaded separately; their upstream terms apply.
 
 | Component | Source and license location |
 | --- | --- |

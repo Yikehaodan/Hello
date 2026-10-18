@@ -3,7 +3,7 @@ set -eu
 cd "$(dirname "$0")/.."
 [[ $# -ge 1 ]] || { print '用法: source/build-worker.sh whisper.cpp源码目录 [输出目录]'; exit 1; }
 worker_source="${1:A}"
-worker_output="${2:-$PWD/Knock.app/Contents/Resources}"
+worker_output="${2:-$PWD/Hello.app/Contents/Resources}"
 worker_build=$(mktemp -d "${TMPDIR:-/tmp}/lightvoice-worker.XXXXXX")
 trap 'rm -rf "$worker_build"' EXIT
 python3 source/asr-worker/prepare-whisper.py "$worker_source/src/whisper.cpp" "$worker_build/whisper-encoder-reuse.cpp"

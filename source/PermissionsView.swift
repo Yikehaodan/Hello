@@ -39,7 +39,7 @@ struct PermissionChecklist: View {
                 Spacer()
                 Button("重新检查", action: preferences.refresh).buttonStyle(.link)
             }.font(.system(size: 12)).foregroundStyle(.secondary)
-            Text("授权后返回 Knock 会自动更新状态。若仍未生效，请退出并重新打开；更新或移动应用后，可能需要重新添加 Knock。系统中屏幕权限也可能显示为“屏幕与系统音频录制”，Knock 不录制系统音频。")
+            Text("授权后返回 Hello 会自动更新状态。若仍未生效，请退出并重新打开；更新或移动应用后，可能需要重新添加 Hello。系统中屏幕权限也可能显示为“屏幕与系统音频录制”，Hello 不录制系统音频。")
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .onAppear { preferences.refresh() }
@@ -80,7 +80,7 @@ struct PermissionWelcome: View {
             HStack {
                 Image(systemName: "door.left.hand.open").font(.system(size: 28)).foregroundStyle(.indigo)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("欢迎使用 Knock").font(.system(size: 23, weight: .semibold))
+                    Text("欢迎使用 Hello").font(.system(size: 23, weight: .semibold))
                     Text("先了解权限，再开始第一句话。").font(.system(size: 13)).foregroundStyle(.secondary)
                 }
             }

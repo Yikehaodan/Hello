@@ -120,7 +120,7 @@ private struct MainShell: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: "waveform").font(.system(size: 21, weight: .semibold))
-                Text("Knock").font(.system(size: 18, weight: .semibold))
+                Text("Hello").font(.system(size: 18, weight: .semibold))
             }.padding(.horizontal, 12).padding(.top, 48).padding(.bottom, 18)
             VStack(spacing: 2) {
                 sidebarItem(.home)
@@ -137,7 +137,7 @@ private struct MainShell: View {
                 }.frame(width: 30, height: 30)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("本机工作空间").font(.system(size: 12, weight: .medium))
-                    Text("Knock \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                    Text("Hello \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                         .font(.system(size: 10)).foregroundStyle(LVTheme.text.opacity(0.55))
                 }
                 Spacer(minLength: 0)
@@ -198,7 +198,7 @@ private struct HomePage: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    Text("轻叩，开口。").font(.system(size: 48, weight: .medium)).tracking(-0.5)
+                    Text("开口，说声 Hello。").font(.system(size: 48, weight: .medium)).tracking(-0.5)
                         .frame(height: 54, alignment: .leading)
                     HStack(alignment: .top, spacing: min(80, max(24, (geometry.size.width - 48) * 0.16 - 92.8))) {
                         onboarding.frame(maxWidth: .infinity, alignment: .leading)
@@ -719,7 +719,7 @@ private struct DictionaryPage: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            PageHeading(title: "词典", subtitle: "让Knock记住姓名、术语和你常用的词。") {
+            PageHeading(title: "词典", subtitle: "让Hello记住姓名、术语和你常用的词。") {
                 HStack(spacing: 8) {
                     Button(action: importCSV) { Label("导入", systemImage: "square.and.arrow.down") }.buttonStyle(SurfaceButtonStyle())
                     Button { editing = nil; word = ""; editorPresented = true } label: { Label("添加词语", systemImage: "plus") }.buttonStyle(SurfaceButtonStyle(prominent: true))
@@ -774,7 +774,7 @@ private struct DictionaryPage: View {
         VStack(alignment: .leading, spacing: 18) {
             Text(editing == nil ? "添加词语" : "编辑词语").font(.system(size: 21, weight: .semibold))
             Text("输入一个姓名、术语或常用词语。词典会用于文字整理。Whisper 和 Qwen 识别时也会参考词典。").font(.system(size: 12)).foregroundStyle(.secondary)
-            TextField("例如：Knock", text: $word).textFieldStyle(.roundedBorder).font(.system(size: 15)).onSubmit(saveWord)
+            TextField("例如：Hello", text: $word).textFieldStyle(.roundedBorder).font(.system(size: 15)).onSubmit(saveWord)
             if let error = library.errorMessage { InlineError(text: error) }
             HStack {
                 Spacer()
@@ -925,7 +925,7 @@ private struct SettingsPage: View {
             settingsRow("附带当前窗口截图", detail: "仅在 Fn＋Control 触发时读取输入框和当前窗口，发送给模型校对；随历史保存在本机，可点击缩略图查看。关闭后只读取输入框。") {
                 Toggle("附带当前窗口截图", isOn: $preferences.contextScreenshots).labelsHidden().toggleStyle(.switch)
             }
-            settingsRow("页面截图权限", detail: preferences.screenCaptureAllowed ? "已允许。读取不到输入框时也能理解当前页面。" : "尚未允许，当前只能读取可访问的输入框文字。允许后如仍无截图，请重新打开Knock。") {
+            settingsRow("页面截图权限", detail: preferences.screenCaptureAllowed ? "已允许。读取不到输入框时也能理解当前页面。" : "尚未允许，当前只能读取可访问的输入框文字。允许后如仍无截图，请重新打开Hello。") {
                 Button(preferences.screenCaptureAllowed ? "检查权限" : "允许页面截图") { preferences.requestScreenCapture() }.buttonStyle(SurfaceButtonStyle())
             }
             sectionHeading("语言", symbol: "globe")
@@ -1035,7 +1035,7 @@ private struct SettingsPage: View {
     private var generalSettings: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeading("通用", symbol: "slider.horizontal.3")
-            settingsRow("外观", detail: "选择Knock的显示主题。") {
+            settingsRow("外观", detail: "选择Hello的显示主题。") {
                 settingsPicker("外观", selection: $model.appearance, values: [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")])
             }
             settingsRow("登录时启动", detail: preferences.loginItemDetail) {
@@ -1047,7 +1047,7 @@ private struct SettingsPage: View {
                     }
                 }
             }
-            settingsRow("在 Dock 中显示", detail: "关闭后仍可从菜单栏打开Knock。") {
+            settingsRow("在 Dock 中显示", detail: "关闭后仍可从菜单栏打开Hello。") {
                 Toggle("在 Dock 中显示", isOn: Binding(get: { preferences.showDockIcon }, set: preferences.setShowDockIcon))
                     .labelsHidden().toggleStyle(.switch).controlSize(.small)
             }
@@ -1106,10 +1106,10 @@ private struct SettingsPage: View {
     }
     private var aboutSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Label("Knock", systemImage: "waveform").font(.system(size: 26, weight: .medium))
+            Label("Hello", systemImage: "waveform").font(.system(size: 26, weight: .medium))
             Text("版本 " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "开发预览"))
                 .font(.system(size: 13)).foregroundStyle(LVTheme.text.opacity(0.55))
-            Text("轻叩，开口。Knock 希望成为你与 Agent 之间的入口。当前版本支持 macOS 上的语音输入、翻译、上下文听写和问答；语音可选云端或本地模型。")
+            Text("开口，说声 Hello。Hello 希望成为你与 Agent 之间的入口。当前版本支持 macOS 上的语音输入、翻译、上下文听写和问答；语音可选云端或本地模型。")
                 .font(.system(size: 14)).lineSpacing(6).foregroundStyle(LVTheme.text.opacity(0.65))
         }
     }
@@ -1385,7 +1385,7 @@ struct AnswerView: View {
             HStack(spacing: 7) {
                 Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color(red: 0, green: 0.55, blue: 0.44))
-                Text(model.mode == .context ? "Knock · 上下文听写" : "Knock · 问一问").font(.system(size: 16, weight: .semibold))
+                Text(model.mode == .context ? "Hello · 上下文听写" : "Hello · 问一问").font(.system(size: 16, weight: .semibold))
             }.frame(maxWidth: .infinity)
             Button { model.showAnswer = false } label: {
                 Image(systemName: "xmark").font(.system(size: 12)).frame(width: 24, height: 24)

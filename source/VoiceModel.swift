@@ -228,7 +228,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         let permitted = await requestMicrophoneAccess()
         preferences.refresh()
         guard session == token, !Task.isCancelled else { return }
-        guard permitted else { sessionContext = nil; phase = .ready; status = "请在系统设置 → 隐私与安全性 → 麦克风中允许Knock。"; return }
+        guard permitted else { sessionContext = nil; phase = .ready; status = "请在系统设置 → 隐私与安全性 → 麦克风中允许Hello。"; return }
         if transcriptionOperation == nil, let problem = speechModelProblem(requestedSpeechModel, language: requestedLanguage) {
             sessionContext = nil; phase = .ready; status = problem; return
         }
@@ -545,7 +545,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                 contextCaptureStatus: sessionMode == .context ? contextStatus : nil)
         } else {
             sessionHistoryID = library.addHistory(raw: raw, text: result, duration: seconds,
-                application: destination?.name ?? "Knock", mode: sessionMode.rawValue,
+                application: destination?.name ?? "Hello", mode: sessionMode.rawValue,
                 succeeded: succeeded, cancelled: cancelled, audio: audioURL,
                 language: sessionLanguage, targetLanguage: sessionTargetLanguage,
                 contextCaptureStatus: sessionMode == .context ? contextStatus : nil,

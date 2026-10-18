@@ -9,10 +9,10 @@ enum LoginItemState: Equatable {
 
     var detail: String {
         switch self {
-        case .notRegistered: return "关闭。登录 Mac 后可手动打开Knock。"
+        case .notRegistered: return "关闭。登录 Mac 后可手动打开Hello。"
         case .enabled: return "已开启，下次登录 Mac 时自动启动。"
-        case .requiresApproval: return "等待系统允许。请在系统设置的登录项中开启Knock。"
-        case .notFound: return "macOS 未找到此应用。请从完整的Knock.app 中打开后重试。"
+        case .requiresApproval: return "等待系统允许。请在系统设置的登录项中开启Hello。"
+        case .notFound: return "macOS 未找到此应用。请从完整的Hello.app 中打开后重试。"
         case .unknown: return "暂时无法确认登录启动状态，请检查系统设置。"
         }
     }
@@ -55,7 +55,7 @@ struct MicrophoneSnapshot: Equatable {
     var defaultName: String { devices.first(where: \.isDefault)?.name ?? "未找到系统默认麦克风" }
     var detail: String {
         switch permission {
-        case .denied: return "麦克风权限已关闭，请在系统设置的隐私与安全性中允许Knock。"
+        case .denied: return "麦克风权限已关闭，请在系统设置的隐私与安全性中允许Hello。"
         case .restricted: return "麦克风受到系统或设备管理策略限制。"
         case .notDetermined: return "首次开始录音时会请求麦克风权限。当前跟随系统声音输入。"
         case .authorized:

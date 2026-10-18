@@ -27,12 +27,12 @@ def download(file,cache,done,total):
  if target.exists():target.unlink()
  for attempt in range(3):
   url=file['url']
-  endpoint=os.environ.get('KNOCK_HF_ENDPOINT','https://huggingface.co').rstrip('/')
+  endpoint=(os.environ.get('HELLO_HF_ENDPOINT') or os.environ.get('KNOCK_HF_ENDPOINT') or 'https://huggingface.co').rstrip('/')
   parsed=urlparse(endpoint)
   if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
    raise InstallError('模型镜像必须是有效的 HTTPS 地址。')
   if url.startswith('https://huggingface.co/'):url=endpoint+url[len('https://huggingface.co'):]
-  if 'github.com/' in url:url+='?knock='+str(time.time_ns())
+  if 'github.com/' in url:url+='?hello='+str(time.time_ns())
   args=['/usr/bin/curl','-fL','--silent','--show-error','--connect-timeout','20','--max-time','1800','--speed-limit','1024','--speed-time','45','--continue-at','-','-o',str(part),url]
   log=tempfile.TemporaryFile();child=subprocess.Popen(args,stderr=log)
   try:

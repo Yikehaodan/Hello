@@ -5,7 +5,7 @@ import hashlib,json,subprocess,tarfile,zipfile,shutil,os,sys,fcntl
 ROOT=Path(__file__).resolve().parent.parent
 CACHE=ROOT/'.build-runtime'; CACHE.mkdir(exist_ok=True)
 LOCK=(CACHE/'runtime.lock').open('a'); fcntl.flock(LOCK,fcntl.LOCK_EX)
-DEST=ROOT/'Knock.app/Contents/Resources/SpeechRuntime'
+DEST=ROOT/'Hello.app/Contents/Resources/SpeechRuntime'
 ARCHIVE='cpython-3.12.15+20261009-aarch64-apple-darwin-install_only_stripped.tar.gz'
 PYTHON_SHA='233f8e15255b3e1d1fd47ea5dd5230dfed803f371138e896e54d98c60ae19f6f'
 

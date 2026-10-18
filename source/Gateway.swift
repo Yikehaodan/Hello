@@ -71,10 +71,10 @@ struct Gateway {
             if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) { value = String(value.dropFirst().dropLast()) }
             values[name] = value
         }
-        base = (values["KNOCK_LLM_BASE_URL"] ?? values["OPENCAS_LLM_BASE_URL"] ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        key = values["KNOCK_LLM_API_KEY"] ?? values["OPENCAS_LLM_API_KEY"] ?? ""
+        base = (values["HELLO_LLM_BASE_URL"] ?? values["KNOCK_LLM_BASE_URL"] ?? values["OPENCAS_LLM_BASE_URL"] ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        key = values["HELLO_LLM_API_KEY"] ?? values["KNOCK_LLM_API_KEY"] ?? values["OPENCAS_LLM_API_KEY"] ?? ""
         // Legacy keys remain readable so existing installations can migrate.
-        model = values["KNOCK_LLM_MODEL"] ?? values["LIGHTVOICE_LLM_MODEL"] ?? values["OPENCAS_LLM_MODEL"] ?? ""
+        model = values["HELLO_LLM_MODEL"] ?? values["KNOCK_LLM_MODEL"] ?? values["LIGHTVOICE_LLM_MODEL"] ?? values["OPENCAS_LLM_MODEL"] ?? ""
         guard !key.isEmpty, !model.isEmpty, let url = URL(string: base), url.scheme == "https", url.host != nil else {
             throw VoiceError.message("请在 gateway.env 中配置 HTTPS 服务地址、API Key 和模型名称。")
         }
@@ -87,7 +87,7 @@ struct Gateway {
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
             throw VoiceError.message("请填写有效的 HTTPS 服务地址、API Key 和模型名称；每项只能填写一行。")
         }
-        let body = "KNOCK_LLM_BASE_URL=\(values[0])\nKNOCK_LLM_API_KEY=\(values[1])\nKNOCK_LLM_MODEL=\(values[2])\n"
+        let body = "HELLO_LLM_BASE_URL=\(values[0])\nHELLO_LLM_API_KEY=\(values[1])\nHELLO_LLM_MODEL=\(values[2])\n"
         let manager = FileManager.default
         try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true,
                                     attributes: [.posixPermissions: 0o700])

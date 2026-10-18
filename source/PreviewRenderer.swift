@@ -27,8 +27,8 @@ func renderPreviews(to directory: URL) throws {
         application: "示例编辑器", mode: "context", contextCaptureStatus: "已读取输入框（7 字） · 已获取窗口截图",
         contextInputText: "正在整理预算", contextWindowTitle: "预算草稿",
         contextScreenshotDataURL: "data:image/jpeg;base64," + fixtureData.base64EncodedString())!
-    library.addWord("Agent"); library.addWord("Knock"); library.addWord("API")
-    let previewDefaults = UserDefaults(suiteName: "Knock.Preview." + UUID().uuidString)!
+    library.addWord("Agent"); library.addWord("Hello"); library.addWord("API")
+    let previewDefaults = UserDefaults(suiteName: "Hello.Preview." + UUID().uuidString)!
     previewDefaults.set("light", forKey: "appearance")
     let previewPreferences = AppPreferences(defaults: previewDefaults,
         microphoneProvider: { MicrophoneSnapshot(devices: [], permission: .notDetermined) },

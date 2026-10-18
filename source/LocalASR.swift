@@ -38,7 +38,7 @@ struct LocalASR {
             && FileManager.default.fileExists(atPath: modelURL.path)
     }
     func transcribe(_ audio: URL, language: String = "auto", dictionary: String = "") async throws -> String {
-        guard ready else { throw VoiceError.message("本地语音模型不完整，请重新打开完整的Knock应用包。") }
+        guard ready else { throw VoiceError.message("本地语音模型不完整，请重新打开完整的Hello应用包。") }
         // 只过滤近乎无声的文件；有声音时仍把完整录音交给 Whisper，不切段。
         let file = try AVAudioFile(forReading: audio, commonFormat: .pcmFormatFloat32, interleaved: false)
         guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8192) else {

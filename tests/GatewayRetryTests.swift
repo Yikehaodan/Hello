@@ -4,7 +4,7 @@ import Foundation
 struct GatewayRetryTests {
     @MainActor static func main() async throws {
         let env = FileManager.default.temporaryDirectory.appendingPathComponent("gateway-retry-\(UUID()).env")
-        try "OPENCAS_LLM_BASE_URL=https://retry.invalid/v1\nOPENCAS_LLM_API_KEY=fixture\nKNOCK_LLM_MODEL=DeepSeek-V4.1-Flash".write(to: env, atomically: true, encoding: .utf8)
+        try "OPENCAS_LLM_BASE_URL=https://retry.invalid/v1\nOPENCAS_LLM_API_KEY=fixture\nHELLO_LLM_MODEL=DeepSeek-V4.1-Flash".write(to: env, atomically: true, encoding: .utf8)
         setenv("LIGHTVOICE_ENV", env.path, 1)
         defer { try? FileManager.default.removeItem(at: env); unsetenv("LIGHTVOICE_ENV") }
         let config = URLSessionConfiguration.ephemeral
