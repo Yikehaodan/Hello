@@ -12,9 +12,18 @@
   <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-0.9.3-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.3 for macOS" /></a>
 </p>
 <p align="center"><sub>Apple Silicon · macOS 14+ · 公开预览版 · 尚未经过 Apple 公证</sub></p>
-<p align="center"><a href="#四种方式用声音完成输入">功能介绍</a> · <a href="#下载安装">下载安装</a> · <a href="docs/INSTALL.md">安装帮助</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a></p>
+<p align="center"><a href="#100-秒看-hello-怎么用">观看演示</a> · <a href="#四种方式用声音完成输入">功能介绍</a> · <a href="#下载安装">下载安装</a> · <a href="docs/INSTALL.md">安装帮助</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a></p>
 
 Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开始说话，再按一次，识别后的文字就会填入原来的位置。写消息、记想法、组织长段文字，都可以从开口开始。
+
+## 100 秒，看 Hello 怎么用
+
+从说错会议时间，到反复改错的人名，看看四种输入方式和个人记忆能帮你省掉哪些修改。
+
+https://github.com/user-attachments/assets/f96d5c6f-953e-4ebe-b1e8-424e9c400437
+
+<p align="center"><a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-Demo-1080p.mp4">下载 1080p 视频</a> · <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-Demo-zh-CN.srt">下载中文字幕</a></p>
+<p align="center"><sub>约 1 分 40 秒 · 中文配音 · 示例场景的动效演示，等待时间已压缩；实际输出取决于模型和服务。</sub></p>
 
 ## 四种方式，用声音完成输入
 
