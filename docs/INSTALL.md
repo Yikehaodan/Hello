@@ -4,7 +4,7 @@
 
 ## 下载与安装
 
-1. 从 https://github.com/Yikehaodan/Hello/releases 下载 `Hello-0.9.1-macOS-arm64.dmg`。
+1. 从 https://github.com/Yikehaodan/Hello/releases 下载 `Hello-0.9.2-macOS-arm64.dmg`。
 2. 双击打开 DMG，把 `Hello.app` 拖到旁边的 `Applications` 文件夹。
 3. 从“应用程序”打开 Hello，再推出安装磁盘。
 
@@ -12,7 +12,7 @@
 
 ## 首次打开
 
-**v0.9.1 使用临时签名，尚未取得 Apple Developer ID 签名或完成 Apple 公证。** 首次打开可能被 macOS 阻止。
+**v0.9.2 使用临时签名，尚未取得 Apple Developer ID 签名或完成 Apple 公证。** 首次打开可能被 macOS 阻止。
 
 确认文件来自本项目 Release 且你愿意信任此版本后，可先尝试打开一次，再进入“系统设置 → 隐私与安全性”，找到 Hello 的提示，点击“仍要打开”，按系统提示确认。具体名称可能随系统版本变化。参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
 
@@ -37,7 +37,7 @@
 Release 同时提供 `.dmg.sha256` 文件。把两个文件放在同一个文件夹，在该文件夹的终端执行：
 
 ```sh
-shasum -a 256 -c Hello-0.9.1-macOS-arm64.dmg.sha256
+shasum -a 256 -c Hello-0.9.2-macOS-arm64.dmg.sha256
 ```
 
 输出 `OK` 表示下载内容与发布时的校验值一致；它不代表 Apple 公证。

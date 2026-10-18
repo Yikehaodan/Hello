@@ -7,14 +7,15 @@
 <rect x="92" y="80" width="200" height="36" rx="18" fill="#b8efcc" fill-opacity=".09" stroke="#b8efcc" stroke-opacity=".3"/>
 <circle cx="114" cy="98" r="4" fill="#b8efcc"/><text x="130" y="104" fill="#b8efcc" font-size="14" letter-spacing="2">BUILT FOR macOS</text>
 <text x="86" y="279" fill="#f2f5ed" font-size="142" font-weight="650" letter-spacing="-7">Hello</text>
-<text x="94" y="351" fill="#b8efcc" font-size="34" letter-spacing="-.5">Your voice. A door to more.</text>
+<text x="94" y="351" fill="#b8efcc" font-size="34" letter-spacing="-.5">Say Hello. Make it happen.</text>
 <text x="96" y="410" fill="#a6bdb3" font-size="22">Speak, write, translate, and ask — right where you work.</text>
 <g font-size="14" letter-spacing="1" fill="#c4d5cd"><text x="96" y="563">NATIVE SWIFT</text><circle cx="263" cy="558" r="2"/><text x="287" y="563">LOCAL OR CLOUD</text><circle cx="483" cy="558" r="2"/><text x="507" y="563">ONE Fn AWAY</text></g>
 </g>
-<g transform="translate(1035 160)" stroke="#b8efcc" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
-<path d="M20 340V95C20-15 195-15 195 95V340" fill="none"/>
-<path d="M40 332L144 294V98L40 68Z" fill="#b8efcc" stroke="none"/>
-<circle cx="119" cy="200" r="6" fill="#163b30" stroke="none"/>
-<path d="M238 183V217M266 163V237M294 178V222" fill="none" stroke-width="7"/>
-<path d="M-20 350H230" stroke-opacity=".25" stroke-width="2"/>
+<g transform="translate(925 60) scale(.56)">
+<g stroke-linecap="round" stroke-linejoin="round">
+<path d="M360 250H600C710 250 780 320 780 430V490C780 600 710 670 600 670H420L265 780C245 792 245 782 248 766L270 654C190 620 160 550 160 460V430C160 320 235 250 360 250Z" fill="#d7f7d8"/>
+<g fill="#244e43"><rect x="365" y="400" width="38" height="62" rx="19"/><rect x="535" y="400" width="38" height="62" rx="19"/></g>
+<path d="M405 524C443 578 507 578 545 524" fill="none" stroke="#244e43" stroke-width="28"/>
+<path d="M706 190L718 153M773 222L806 191M815 282L857 269" fill="none" stroke="#b8efcc" stroke-width="22"/>
+</g>
 </g></svg>

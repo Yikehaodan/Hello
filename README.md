@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/hero.svg" alt="Hello — Your voice. A door to more." width="100%" />
+  <img src="docs/assets/hero.svg" alt="Hello — Say Hello. Make it happen." width="100%" />
 </p>
 <p align="center">
   <a href="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml"><img src="https://github.com/Yikehaodan/Hello/actions/workflows/checks.yml/badge.svg" alt="macOS checks" /></a>
@@ -9,7 +9,7 @@
 </p>
 <p align="center"><strong>开口，说声 Hello。</strong><br/>把声音带进你正在使用的应用。</p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.1/Hello-0.9.1-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.1 for macOS" /></a>
+  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.2 for macOS" /></a>
 </p>
 <p align="center"><sub>Apple Silicon · macOS 14+ · 公开预览版 · 尚未经过 Apple 公证</sub></p>
 <p align="center"><a href="docs/INSTALL.md">安装指引</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a> · <a href="#开始使用">开始使用</a> · <a href="docs/SETUP.md">构建与配置</a> · <a href="docs/PERMISSIONS.md">macOS 权限</a> · <a href="docs/MODELS.md">本地模型</a></p>
@@ -38,7 +38,7 @@ Hello 原名 Knock。从旧版升级会保留本机数据与模型，详见[安�
 
 ### 直接下载安装
 
-**[下载 Hello v0.9.1 安装包（DMG）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.1/Hello-0.9.1-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Hello/releases/tag/v0.9.1)
+**[下载 Hello v0.9.2 安装包（DMG）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg)** · [查看 Release 与校验文件](https://github.com/Yikehaodan/Hello/releases/tag/v0.9.2)
 
 1. 打开 DMG，把 `Hello.app` 拖入 `Applications`，从“应用程序”启动。
 2. 按首次引导设置麦克风与辅助功能权限。屏幕录制可选。
