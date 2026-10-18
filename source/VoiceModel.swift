@@ -14,7 +14,12 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     typealias ProcessingOperation = @MainActor (String, InputMode, String, String, String) async throws -> VoiceProcessingResult
     typealias RecordingFactory = @MainActor (URL, [String: Any]) throws -> any VoiceRecording
     enum Phase: String { case ready, authorizing, recording, transcribing, polishing }
-    @Published var phase = Phase.ready
+    @Published var phase = Phase.ready {
+        didSet {
+            if phase != .ready { memoryCapture?.finish(); memoryCapture = nil }
+            memory.setBusy(phase != .ready)
+        }
+    }
     @Published var raw = ""
     @Published var result = ""
     @Published private(set) var apiRetryAttempt = 0
@@ -57,6 +62,8 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     @Published var appearance = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
         didSet { UserDefaults.standard.set(appearance, forKey: "appearance") }
     }
+    let memory: MemoryStore
+    private var memoryCapture: MemoryCapture?
     let library: LibraryStore
     let preferences: AppPreferences
     let speechModels: SpeechModelStore
@@ -94,6 +101,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     private let requestMicrophoneAccess: @MainActor () async -> Bool
     private let transcriptionOperation: TranscriptionOperation?
     private let processingOperation: ProcessingOperation?
+    private var recognitionDictionary: String { [library.dictionaryPrompt, memory.speechWords].filter { !$0.isEmpty }.joined(separator: "、") }
     var busy: Bool { phase != .ready }
     var retryingHistoryID: UUID? { busy ? sessionHistoryID : nil }
     var hasUnsavedRecording: Bool { audioURL != nil && (historySavePending || sessionHistoryID == nil) }
@@ -104,7 +112,9 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
          transcriptionOperation: TranscriptionOperation? = nil, processingOperation: ProcessingOperation? = nil,
          asrResources: URL? = nil, cloudConfiguration: CloudSpeechConfiguration? = nil, speechModels: SpeechModelStore? = nil,
          recordingFactory: @escaping RecordingFactory = { url, settings in try AVAudioRecorder(url: url, settings: settings) }) {
-        self.library = library ?? LibraryStore()
+        let resolvedLibrary = library ?? LibraryStore()
+        self.library = resolvedLibrary
+        self.memory = MemoryStore(root: resolvedLibrary.dataDirectory)
         self.preferences = preferences ?? AppPreferences()
         self.sessionRoot = sessionRoot ?? FileManager.default.temporaryDirectory.appendingPathComponent("LightVoiceSessions", isDirectory: true)
         self.requestMicrophoneAccess = requestMicrophoneAccess
@@ -119,6 +129,9 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         self.residentASR = ResidentASR(resources: resources, modelURL: models.whisperModel)
         self.recordingFactory = recordingFactory
         super.init()
+        memory.consolidator = { evidence, existing in try await Gateway().consolidateMemory(evidence, existing: existing) }
+        memory.onDisabled = { [weak self] in self?.memoryCapture?.cancel(); self?.memoryCapture = nil }
+        memory.schedule()
         try? FileManager.default.createDirectory(at: self.sessionRoot, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         LiveTranscription.cleanupAbandoned(in: self.sessionRoot, removeRecent: self.library.retention == .never)
@@ -301,7 +314,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         warmup = Task { try? await backend.warmup() }
         liveTranscription = try? LiveTranscription(
             directory: sessionRoot.appendingPathComponent("live-" + token.uuidString),
-            language: sessionLanguage, dictionary: library.dictionaryPrompt,
+            language: sessionLanguage, dictionary: recognitionDictionary,
             operation: { audio, language, dictionary in
                 try await backend.transcribe(audio, language: language, dictionary: dictionary)
             })
@@ -331,7 +344,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     private func transcribeComplete(_ audio: URL, allowCloud: Bool = true) async throws -> String {
         if sessionSpeechModel.usesManagedRuntime {
-            return try await backend(for: sessionSpeechModel).transcribe(audio, language: sessionLanguage, dictionary: library.dictionaryPrompt)
+            return try await backend(for: sessionSpeechModel).transcribe(audio, language: sessionLanguage, dictionary: recognitionDictionary)
         }
         if sessionSpeechModel == .cloud, allowCloud, let configuration = cloudConfiguration {
             let cloud = CloudTranscription(configuration: configuration,
@@ -342,11 +355,11 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             catch { try Task.checkCancellation(); status = "连接暂不可用，正在使用 Whisper 完整识别……" }
         }
         if residentASR.ready {
-            do { return try await residentASR.transcribe(audio, language: sessionLanguage, dictionary: library.dictionaryPrompt) }
+            do { return try await residentASR.transcribe(audio, language: sessionLanguage, dictionary: recognitionDictionary) }
             catch is CancellationError { throw CancellationError() }
             catch { try Task.checkCancellation() }
         }
-        return try await asr.transcribe(audio, language: sessionLanguage, dictionary: library.dictionaryPrompt)
+        return try await asr.transcribe(audio, language: sessionLanguage, dictionary: recognitionDictionary)
     }
     func stop() {
         guard phase == .recording else { return }
@@ -381,7 +394,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             do {
                 let text: String
                 if let transcriptionOperation {
-                    text = try await transcriptionOperation(audio, sessionLanguage, library.dictionaryPrompt)
+                    text = try await transcriptionOperation(audio, sessionLanguage, recognitionDictionary)
                 } else if let cloud = cloudTranscription {
                     do { text = try await cloud.finish(audio: audio).text }
                     catch is CancellationError { throw CancellationError() }
@@ -491,14 +504,15 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                     self.status = "API 连接暂时失败，正在重试（\(attempt)/\(limit)）……"
                 })
                 switch sessionMode {
-                case .dictate: output = try await gateway.polish(text, dictionary: library.dictionaryPrompt)
-                case .translate: output = try await gateway.translate(text, to: sessionTargetLanguage, dictionary: library.dictionaryPrompt)
+                case .dictate: output = try await gateway.polish(text, dictionary: library.dictionaryPrompt, memory: memory.prompt(for: text, mode: sessionMode.rawValue))
+                case .translate: output = try await gateway.translate(text, to: sessionTargetLanguage, dictionary: library.dictionaryPrompt, memory: memory.prompt(for: text, mode: sessionMode.rawValue))
                 case .context:
                     output = try await gateway.polish(text, dictionary: library.dictionaryPrompt,
-                        context: sessionContext ?? VoiceContext(captureStatus: contextStatus))
+                        context: sessionContext ?? VoiceContext(captureStatus: contextStatus), memory: memory.prompt(for: text, mode: sessionMode.rawValue))
                 case .ask:
                     let answer = try await gateway.ask(text, selectedText: destination?.selectedText ?? "",
                         defaultCity: preferences.weatherCity, pendingQuestion: pendingWeatherQuestion,
+                        memory: memory.prompt(for: text, mode: sessionMode.rawValue),
                         onLookup: { [weak self] message in
                             guard let self, self.session == token, !Task.isCancelled else { return }
                             self.lookupStatus = message; self.status = message + "……"; self.apiRetryAttempt = 0
@@ -599,7 +613,15 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     private func deliverResult(requireOriginalSelection: Bool = false) {
         guard autoPaste, let destination else { copyResult(); return }
+        memoryCapture?.finish(); memoryCapture = nil
+        if memory.enabled, sessionMode == .dictate || sessionMode == .context {
+            let token = session
+            memoryCapture = destination.memoryCapture(for: result) { [weak self] before, after in
+                self?.memory.record(before: before, after: after, session: token)
+            }
+        }
         status = destination.insert(result, requireOriginalSelection: requireOriginalSelection)
+        memoryCapture?.start()
     }
     func cancel(preservingRecording: Bool = false) {
         let wasProcessing = phase == .transcribing || phase == .polishing

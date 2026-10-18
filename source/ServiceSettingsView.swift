@@ -3,28 +3,42 @@ import AppKit
 
 struct ServiceSettingsView: View {
     @ObservedObject var model: VoiceModel
-    @State private var base = ""
+    @State private var base = Gateway.defaultBase
     @State private var key = ""
-    @State private var name = ""
+    @State private var name = Gateway.defaultModel
     @State private var message = ""
     @State private var failed = false
+    @State private var checking = false
+    @State private var connectionTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("本地听写可以离线使用。自动整理、翻译、问答和上下文听写需要配置文字服务。")
                 .font(.system(size: 13)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 10) {
-                Text("兼容 Chat Completions 的 HTTPS 服务").font(.headline)
-                TextField("服务地址，例如 https://your-provider.example/v1", text: $base)
+                HStack {
+                    Text("文字服务").font(.headline)
+                    Spacer()
+                    Button("使用 DeepSeek 官方") {
+                        if URL(string: base)?.host?.lowercased() != "api.deepseek.com" { key = "" }
+                        base = Gateway.defaultBase; name = Gateway.defaultModel; message = ""
+                    }
+                }
+                Text("默认使用 DeepSeek 官方，也可填写其他兼容 Chat Completions 的服务。")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                TextField("服务地址，例如 https://api.deepseek.com", text: $base)
                 SecureField("API Key", text: $key)
                 TextField("模型名称，以服务商提供的名称为准", text: $name)
-            }.textFieldStyle(.roundedBorder)
+            }.textFieldStyle(.roundedBorder).disabled(checking || model.busy)
             Text("上下文截图需要模型支持图片输入。密钥仅写入当前 Mac 的配置文件；请求会发往上面填写的服务。")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             HStack {
                 Button("保存配置") { save() }.buttonStyle(.borderedProminent)
+                Button(checking ? "正在测试…" : "测试连接") { testConnection() }
                 Button("打开配置目录") { openConfiguration() }
-            }.disabled(model.busy)
+            }.disabled(model.busy || checking)
+            Text("测试连接只发送一条固定测试文字，不会保存配置或发送历史记录。")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
             if !message.isEmpty {
                 Label(message, systemImage: failed ? "exclamationmark.circle" : "checkmark.circle")
                     .font(.system(size: 12)).foregroundStyle(failed ? Color.orange : Color.green)
@@ -41,7 +55,26 @@ struct ServiceSettingsView: View {
             }
         }.onAppear {
             if let gateway = try? Gateway() { base = gateway.base; key = gateway.key; name = gateway.model }
+        }.onDisappear {
+            connectionTask?.cancel(); connectionTask = nil; checking = false
         }
+    }
+    private func testConnection() {
+        do {
+            let gateway = try Gateway(base: base, key: key, model: name)
+            checking = true; message = ""
+            connectionTask = Task { @MainActor in
+                defer { checking = false; connectionTask = nil }
+                do {
+                    try await gateway.testConnection()
+                    guard !Task.isCancelled else { return }
+                    failed = false; message = "连接成功，\(gateway.model) 已返回文字。修改后的配置需要点击保存。"
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    failed = true; message = error.localizedDescription
+                }
+            }
+        } catch { failed = true; message = error.localizedDescription }
     }
     private func save() {
         do {

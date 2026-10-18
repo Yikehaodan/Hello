@@ -19,7 +19,7 @@ struct PermissionChecklist: View {
             permissionRow("辅助功能", symbol: "keyboard", badge: "跨应用输入",
                           state: preferences.accessibilityAllowed ? "已允许" : "尚未允许",
                           allowed: preferences.accessibilityAllowed,
-                          detail: "用于全局 Fn 快捷键、读取当前输入框或选中文字，以及把结果写回光标位置。未授权时可用窗口按钮录音并手动复制。",
+                          detail: "用于全局 Fn 快捷键、读取当前输入框或选中文字，以及把结果写回光标位置。开启个人记忆后，还会在听写结束的 30 秒内观察原输入框的纠正。未授权时可用窗口按钮录音并手动复制。",
                           actionTitle: "前往授权", action: enableShortcut)
             permissionRow("屏幕录制", symbol: "rectangle.dashed.badge.record", badge: "可选",
                           state: preferences.screenCaptureAllowed ? "已允许" : "尚未允许",

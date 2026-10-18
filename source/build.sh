@@ -42,8 +42,8 @@ cat > 'Hello.app/Contents/Info.plist' <<'PLIST'
 <key>CFBundleDisplayName</key><string>Hello</string>
 <key>CFBundleIconFile</key><string>Hello</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.9.2</string>
-<key>CFBundleVersion</key><string>28</string>
+<key>CFBundleShortVersionString</key><string>0.9.3</string>
+<key>CFBundleVersion</key><string>29</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSMicrophoneUsageDescription</key><string>Hello 仅在你主动开始录音后使用麦克风，将口述转成文字或用于语音提问。</string>
 <key>NSHighResolutionCapable</key><true/>

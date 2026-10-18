@@ -50,6 +50,17 @@ struct PortabilityTests {
         try "KNOCK_LLM_BASE_URL=https://legacy.example/v1\nKNOCK_LLM_API_KEY=legacy-fixture\nKNOCK_LLM_MODEL=legacy-model\n".write(to: config, atomically: true, encoding: .utf8)
         gateway = try Gateway()
         precondition(gateway.base == "https://legacy.example/v1" && gateway.key == "legacy-fixture" && gateway.model == "legacy-model")
+        try "HELLO_LLM_API_KEY=official-fixture\n".write(to: config, atomically: true, encoding: .utf8)
+        gateway = try Gateway()
+        precondition(gateway.base == "https://api.deepseek.com" && gateway.model == "deepseek-flash")
+        try "HELLO_LLM_BASE_URL=https://private.example/v1\nHELLO_LLM_API_KEY=private-fixture\n".write(to: config, atomically: true, encoding: .utf8)
+        do { _ = try Gateway(); fatalError("Custom services must provide their own model") } catch {}
+        let before = try Data(contentsOf: config)
+        _ = try Gateway(base: Gateway.defaultBase, key: "unsaved-fixture", model: Gateway.defaultModel)
+        let after = try Data(contentsOf: config)
+        precondition(after == before, "Testing unsaved settings must not change saved credentials")
+        do { _ = try Gateway(base: Gateway.defaultBase, key: "", model: Gateway.defaultModel); fatalError("No built-in credential") } catch {}
         print("PASS: independent data/model paths, missing-config guidance, private config writes and replacement, endpoint validation")
+        print("PASS: official defaults without bundled keys; custom and legacy endpoints preserved; unsaved settings are isolated")
     }
 }

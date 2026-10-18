@@ -78,7 +78,7 @@ private struct MainShell: View {
                     switch page {
                     case .home: HomePage(model: model, library: library, openWorkbench: { page = .workbench }, openHistory: { page = .history }, openSettings: { page = .settings })
                     case .history: HistoryPage(model: model, library: library)
-                    case .dictionary: DictionaryPage(library: library)
+                    case .dictionary: DictionaryPage(library: library, memory: model.memory)
                     case .settings: HomePage(model: model, library: library, openWorkbench: { page = .workbench }, openHistory: { page = .history }, openSettings: { page = .settings })
                     case .workbench: WorkbenchPage(model: model, back: { page = .home })
                     }
@@ -90,6 +90,7 @@ private struct MainShell: View {
                 }
             }.padding(.top, 44)
         }
+        .overlay(alignment: .bottom) { MemoryNotice(store: model.memory) }
         .font(.system(size: 14)).foregroundStyle(LVTheme.text)
         .background(LVTheme.background)
         .frame(minWidth: 1000, minHeight: 700)
@@ -717,7 +718,19 @@ private struct DictionaryPage: View {
             (source == "all" || (source == "manual" ? $0.source == .manual : $0.source == .automatic))
         }
     }
+    @ObservedObject var memory: MemoryStore
+    @State private var tab = 0
     var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Picker("词典与记忆", selection: $tab) {
+                Text("常用词典").tag(0)
+                Text("个人记忆").tag(1)
+            }.pickerStyle(.segmented).frame(width: 280).padding(.horizontal, 24)
+            if tab == 0 { dictionaryBody }
+            else { MemoryPage(store: memory).padding(.horizontal, 24).padding(.bottom, 20) }
+        }
+    }
+    private var dictionaryBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             PageHeading(title: "词典", subtitle: "让Hello记住姓名、术语和你常用的词。") {
                 HStack(spacing: 8) {

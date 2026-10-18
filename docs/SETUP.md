@@ -20,14 +20,18 @@ zsh scripts/setup.sh
 
 ## 文字服务
 
-打开“设置 → 服务配置”，填写 HTTPS 服务地址、API Key 和模型名称。地址通常以 `/v1` 结尾，Hello 会追加 `/chat/completions`。保存后对下一次文字处理生效。需要自动整理时，在“个性化”中开启该选项。
+打开“设置 → 服务配置”，默认使用 DeepSeek 官方地址 `https://api.deepseek.com` 和模型 `deepseek-flash`。填写你自己的 API Key，点击“测试连接”，成功后保存。测试只发送固定测试文字，不会发送历史记录。接口参数以 [DeepSeek 官方文档](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)为准。
+
+也可填写其他兼容 Chat Completions 的 HTTPS 服务地址和模型名称。Hello 会在地址后追加 `/chat/completions`。已有配置会保留；点击“使用 DeepSeek 官方”切换服务商时，会清空其他服务的密钥，保存前不影响当前配置。
+
+保存后对下一次文字处理生效。需要自动整理时，在“个性化”中开启该选项。[个人记忆](MEMORY.md)也复用这里配置的服务。
 
 也可以复制 `examples/gateway.env.example` 到设置页显示的配置目录，命名为 `gateway.env`。文件包含：
 
 ```dotenv
-HELLO_LLM_BASE_URL=https://your-provider.example/v1
+HELLO_LLM_BASE_URL=https://api.deepseek.com
 HELLO_LLM_API_KEY=replace-with-your-api-key
-HELLO_LLM_MODEL=replace-with-your-model-name
+HELLO_LLM_MODEL=deepseek-flash
 ```
 
 文件是键值配置，不会作为脚本执行。手动创建后建议执行 `chmod 600`，限制为当前用户读写。应用内保存会自动设置此权限。

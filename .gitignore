@@ -25,3 +25,7 @@ __pycache__/
 /tests/**/*-results.json
 /previews/
 /dist/
+
+# Personal correction memory stays on the user's Mac.
+memory.md
+!docs/MEMORY.md

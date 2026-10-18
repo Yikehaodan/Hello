@@ -234,6 +234,30 @@ struct TextDestination {
         return "已向\(name)输入文字，结果也已复制。"
     }
 
+    /// Called immediately before paste; inability to identify the exact field disables learning.
+    func memoryCapture(for inserted: String, complete: @escaping (String, String) -> Void) -> MemoryCapture? {
+        guard AXIsProcessTrusted(), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.15)
+        guard let field = Self.focusedInput(app: app, pid: pid), Self.isEditable(field), !Self.isSecure(field),
+              let range = Self.selectedRange(field), let before = Self.memoryValue(field),
+              let anchor = MemoryInsertionAnchor(before: before, selection: NSRange(location: range.location, length: range.length), inserted: inserted) else { return nil }
+        AXUIElementSetMessagingTimeout(field, 0.15)
+        return MemoryCapture(anchor: anchor, read: {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+                  let current = Self.focusedInput(app: app, pid: pid), CFEqual(current, field),
+                  !Self.isSecure(current) else { return nil }
+            return Self.memoryValue(current)
+        }, complete: complete)
+    }
+
+    private static func memoryValue(_ field: AXUIElement) -> String? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(field, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String, text.count <= 24000 else { return nil }
+        return text
+    }
+
     private static func selectedRange(_ element: AXUIElement) -> CFRange? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,

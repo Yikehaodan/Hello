@@ -9,7 +9,7 @@
 </p>
 <p align="center"><strong>开口，说声 Hello。</strong><br/>在你正在使用的应用里，听写、翻译、提问。</p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.2 for macOS" /></a>
+  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-0.9.3-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.3 for macOS" /></a>
 </p>
 <p align="center"><sub>Apple Silicon · macOS 14+ · 公开预览版 · 尚未经过 Apple 公证</sub></p>
 <p align="center"><a href="#四种方式用声音完成输入">功能介绍</a> · <a href="#下载安装">下载安装</a> · <a href="docs/INSTALL.md">安装帮助</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a></p>
@@ -36,6 +36,18 @@ Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开�
 
 把人名、产品名和专业词加入个人词典，供文字处理时参考。历史记录支持搜索、查看识别原文、回放录音和重新处理；可用内容取决于本机保留设置。
 
+**个人记忆会学习你纠正过的写法。** 例如把“小雪”改成“晓雪”，相同纠正在不同听写中重复出现后，Hello 会把它作为人名参考。“好的 → OK”这类表达偏好需要你确认后启用。记忆保存在本机 `memory.md`，可查看、编辑和删除。
+
+在“词典 → 个人记忆”中开启，默认关闭。自动捕获取决于输入框是否支持读取，也可以手动添加。具体规则见[个人记忆说明](docs/MEMORY.md)。
+
+<details>
+<summary>查看个人记忆界面</summary>
+
+<p align="center"><img src="docs/assets/memory.png" alt="Hello 个人记忆界面：查看姓名纠正与表达偏好，支持停用、编辑和删除。" width="850" /></p>
+<p align="center"><sub>v0.9.3 实际应用视图，使用演示数据。</sub></p>
+
+</details>
+
 <details>
 <summary>查看历史记录界面</summary>
 
@@ -46,7 +58,7 @@ Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开�
 
 ## 下载安装
 
-**[下载 Hello v0.9.2（macOS 安装包）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.2/Hello-0.9.2-macOS-arm64.dmg)**
+**[下载 Hello v0.9.3（macOS 安装包）](https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-0.9.3-macOS-arm64.dmg)**
 
 支持 Apple Silicon Mac（M 系列芯片），需要 macOS 14 或更新版本。界面为简体中文。目前不支持 Intel Mac、Windows 和 Linux。
 
@@ -55,7 +67,7 @@ Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开�
 3. 在“设置 → 语音模型”中下载并选择模型。中文听写可以先用 Zipformer；其他模型见[模型说明](docs/MODELS.md)。
 4. 把光标放入输入框，轻按 `Fn`，开始第一次听写。
 
-安装包已包含运行组件，无需安装开发工具。模型权重按需下载，支持暂停、继续和校验。需要翻译等功能时，在“设置 → 服务配置”填写服务地址、API Key 和模型名称。
+安装包已包含运行组件，无需安装开发工具。模型权重按需下载，支持暂停、继续和校验。需要翻译等功能时，在“设置 → 服务配置”填写你自己的 API Key。文字服务默认使用 DeepSeek 官方，也支持自定义服务；保存前可点击“测试连接”。
 
 **当前版本使用临时签名，尚未经过 Apple 公证。** 首次打开若被系统阻止，确认下载来源并信任此版本后，可在“系统设置 → 隐私与安全性”中找到 Hello，点击“仍要打开”。具体步骤见[安装帮助](docs/INSTALL.md)。
 
@@ -71,6 +83,8 @@ Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开�
 
 本地语音模型在 Mac 上处理录音。选择云端语音后，录音会发送到对应服务。使用文字服务时，相关文字会发送到你配置的服务；上下文听写还可能发送输入框内容、窗口标题和截图。
 
+开启个人记忆后，Hello 会在听写后的 30 秒内观察原输入框的局部修改，并把必要片段交给配置的文字服务整理。记忆独立于历史记录保留，可在个人记忆页管理。
+
 权限可以之后在设置中补充，详细用途、未授权时的用法和数据保留说明见[权限与数据](docs/PERMISSIONS.md)。
 
 ## 帮助与反馈
@@ -78,6 +92,7 @@ Hello 是一款 macOS 语音工具。把光标放在输入框，轻按 `Fn` 开�
 - [安装与更新](docs/INSTALL.md)：首次打开、版本替换、下载文件校验。
 - [模型管理](docs/MODELS.md)：选择模型、下载失败、导入已有权重。
 - [服务配置](docs/SETUP.md#文字服务)：接入文字服务和可选的云端语音。
+- [个人记忆](docs/MEMORY.md)：捕获纠正、确认偏好和管理本机记忆。
 - [反馈问题](https://github.com/Yikehaodan/Hello/issues)：请附 macOS 版本、芯片型号、模型和复现步骤，勿附密钥或私人录音。
 
 Hello 希望成为人与 Agent 交流的入口，当前版本专注于语音输入与问答。

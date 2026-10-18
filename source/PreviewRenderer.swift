@@ -54,6 +54,13 @@ func renderPreviews(to directory: URL) throws {
     for page in ["home", "history", "dictionary", "settings", "studio"] {
         try renderView(MainView(model: model, enableShortcut: {}, previewPage: page), size: NSSize(width: 1080, height: 750), to: directory.appendingPathComponent(page + ".png"))
     }
+    let previewMemory = MemoryStore(root: temporary.appendingPathComponent("memory-preview"))
+    previewMemory.setEnabled(true)
+    previewMemory.save(original: "小雪", preferred: "晓雪", kind: .correction, scope: .person)
+    previewMemory.save(original: "好的", preferred: "OK", kind: .expression, scope: .dictation)
+    previewMemory.record(before: "我们在飞数上沟通。", after: "我们在飞书上沟通。", session: UUID())
+    try renderView(MemoryPage(store: previewMemory).padding(24).frame(width: 850, height: 650).background(Color.white),
+        size: NSSize(width: 850, height: 650), to: directory.appendingPathComponent("memory.png"))
     app.appearance = NSAppearance(named: .darkAqua)
     try renderView(MainView(model: model, enableShortcut: {}, previewPage: "home").environment(\.colorScheme, .dark), size: NSSize(width: 1080, height: 750), to: directory.appendingPathComponent("home-dark.png"))
     app.appearance = NSAppearance(named: .aqua)

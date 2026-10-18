@@ -109,6 +109,7 @@ final class LibraryStore: ObservableObject {
         var history: [HistoryEntry]
         var words: [DictionaryWord]
     }
+    var dataDirectory: URL { root }
     private let root: URL
     private var file: URL { root.appendingPathComponent("library.json") }
     private var audioRoot: URL { root.appendingPathComponent("recordings", isDirectory: true) }

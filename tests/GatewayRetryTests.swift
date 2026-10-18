@@ -90,5 +90,16 @@ struct GatewayRetryTests {
         do { _ = try await job.value; fatalError("must cancel") } catch is CancellationError {} catch { fatalError("unexpected cancellation error") }
         precondition(FaultTransport.requests.count == 1)
         print("PASS: cancellation interrupts retry delay without sending another request; no real network")
+
+        let unsaved = try Gateway(base: Gateway.defaultBase, key: "connection-fixture", model: Gateway.defaultModel, transport: transport)
+        FaultTransport.reset([200])
+        try await unsaved.testConnection()
+        let probe = try JSONSerialization.jsonObject(with: FaultTransport.requests[0]) as! [String: Any]
+        precondition(probe["model"] as? String == Gateway.defaultModel && probe["max_tokens"] as? Int == 32)
+        precondition((probe["messages"] as? [[String: String]])?.count == 1)
+        FaultTransport.reset([503, 200])
+        do { try await unsaved.testConnection(); fatalError("Connection test must report failure") } catch {}
+        precondition(FaultTransport.requests.count == 1, "Connection tests must not retry or process personal content")
+        print("PASS: unsaved official connection test uses a bounded synthetic message and no retries")
     }
 }
