@@ -13,7 +13,7 @@ struct ServiceSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("本地听写可以离线使用。自动整理、翻译、问答和上下文听写需要配置文字服务。")
+            Text("本地听写可以离线使用。自动整理、翻译和上下文听写需要配置文字服务。")
                 .font(.system(size: 13)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -43,6 +43,11 @@ struct ServiceSettingsView: View {
                 Label(message, systemImage: failed ? "exclamationmark.circle" : "checkmark.circle")
                     .font(.system(size: 12)).foregroundStyle(failed ? Color.orange : Color.green)
             }
+            Divider()
+            Text("Agent · Fn + Space").font(.headline)
+            Text("Agent 可单独配置模型服务，支持 DeepSeek 的 Anthropic 兼容接口。进度、操作确认和结果都在 Hello 气泡显示。")
+                .font(.system(size: 13)).foregroundStyle(.secondary)
+            Button("配置 Agent 模型") { NotificationCenter.default.post(name: .helloShowAgentSettings, object: nil) }
             Divider()
             Text("豆包云端语音（可选）").font(.headline)
             Text("在配置目录放入 doubao.env，填写 DOUBAO_API_KEY，然后重新打开 Hello。未配置时使用本地模型。配置示例见仓库 examples 目录。")

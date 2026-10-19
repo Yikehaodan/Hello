@@ -30,12 +30,32 @@ func renderPreviews(to directory: URL) throws {
     library.addWord("Agent"); library.addWord("Hello"); library.addWord("API")
     let previewDefaults = UserDefaults(suiteName: "Hello.Preview." + UUID().uuidString)!
     previewDefaults.set("light", forKey: "appearance")
+    var previewMicrophone = MicrophonePermission.notDetermined
+    var previewAccessibility = false, previewScreen = false
     let previewPreferences = AppPreferences(defaults: previewDefaults,
-        microphoneProvider: { MicrophoneSnapshot(devices: [], permission: .notDetermined) },
-        openURL: { _ in false }, accessibilityProvider: { false }, screenCaptureProvider: { false })
+        microphoneProvider: { MicrophoneSnapshot(devices: [], permission: previewMicrophone) },
+        openURL: { _ in false }, accessibilityProvider: { previewAccessibility }, screenCaptureProvider: { previewScreen })
     let model = VoiceModel(library: library, sessionRoot: temporary.appendingPathComponent("sessions"), preferences: previewPreferences)
     try renderView(PermissionWelcome(preferences: previewPreferences, enableShortcut: {}, close: {}),
                    size: NSSize(width: 600, height: 690), to: directory.appendingPathComponent("permissions.png"))
+    previewMicrophone = .denied
+    previewPreferences.contextScreenshots = true
+    previewPreferences.refresh()
+    try renderView(PermissionWelcome(preferences: previewPreferences, enableShortcut: {}, close: {}),
+                   size: NSSize(width: 600, height: 690), to: directory.appendingPathComponent("permissions-denied.png"))
+    try renderView(MainView(model: model, enableShortcut: {}, previewPage: "home"),
+                   size: NSSize(width: 1080, height: 750), to: directory.appendingPathComponent("permissions-banner.png"))
+    previewMicrophone = .restricted
+    previewPreferences.refresh()
+    try renderView(PermissionWelcome(preferences: previewPreferences, enableShortcut: {}, close: {}),
+                   size: NSSize(width: 600, height: 690), to: directory.appendingPathComponent("permissions-restricted.png"))
+    previewMicrophone = .authorized; previewAccessibility = true; previewScreen = true
+    previewPreferences.refresh()
+    try renderView(PermissionWelcome(preferences: previewPreferences, enableShortcut: {}, close: {}),
+                   size: NSSize(width: 600, height: 690), to: directory.appendingPathComponent("permissions-ready.png"))
+    previewMicrophone = .notDetermined; previewAccessibility = false; previewScreen = false
+    previewPreferences.contextScreenshots = false
+    previewPreferences.refresh()
     model.shortcutStatus = "预览模式 · 不会启用麦克风或监听快捷键"
     model.raw = library.history.last?.raw ?? ""
     model.result = library.history.last?.text ?? ""
@@ -82,7 +102,19 @@ func renderPreviews(to directory: URL) throws {
     model.raw = "1 加 1 等于几？"
     model.result = "1 加 1 等于 2。"
     try renderView(AnswerView(model: model), size: NSSize(width: 800, height: 488), to: directory.appendingPathComponent("answer.png"))
-    print("PASS: 15 view previews rendered to \(directory.path)")
+    let agentStore = AgentConfigurationStore(root: temporary.appendingPathComponent("agent"), readKey: { "" }, writeKey: { _ in })
+    let task = AgentTaskRecord(title: "查找语音模型资料并整理说明", fingerprint: "preview", messages: [
+        AgentMessage(role: "user", text: "帮我查找语音识别模型的资料，整理一份说明。"),
+        AgentMessage(role: "assistant", text: "已整理模型选择和使用方法。你可以打开工作目录查看文件，或继续补充要求。")
+    ], state: "任务完成")
+    try AgentConfigurationStore.writePrivate(JSONEncoder().encode([task]), to: agentStore.root.appendingPathComponent("tasks.json"))
+    let agent = AgentSession(store: agentStore); agent.select(task.id)
+    try renderView(AgentBubbleView(agent: agent), size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("agent-result.png"))
+    agent.consume(["type": "permission", "id": "preview", "tool": "Write", "input": ["file_path": "/示例目录/模型说明.md", "content": "语音模型选择说明……"]])
+    try renderView(AgentBubbleView(agent: agent), size: NSSize(width: 640, height: 560), to: directory.appendingPathComponent("agent-permission.png"))
+    agent.stop()
+    try renderView(AgentSettingsView(agent: agent), size: NSSize(width: 598, height: 670), to: directory.appendingPathComponent("agent-settings.png"))
+    print("PASS: view previews rendered to \(directory.path)")
 }
 
 @MainActor

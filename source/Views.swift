@@ -65,13 +65,9 @@ private struct MainShell: View {
         HStack(spacing: 0) {
             sidebar
             VStack(spacing: 0) {
-                if preferences.needsRequiredPermissions {
-                    HStack(spacing: 10) {
-                        Image(systemName: "lock.shield")
-                        Text("完成权限设置，即可用 Fn 开口并自动输入。").font(.system(size: 12))
-                        Spacer()
-                        Button("查看权限") { showPermissions = true }.buttonStyle(.link)
-                    }.padding(12).background(Color.indigo.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                if !preferences.missingPermissions.isEmpty {
+                    PermissionWarningBanner(preferences: preferences, enableShortcut: enableShortcut,
+                                            showDetails: { showPermissions = true })
                         .padding(.horizontal, 24).padding(.bottom, 20)
                 }
                 Group {
@@ -114,6 +110,10 @@ private struct MainShell: View {
                 showPermissions = false
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .helloShowPermissions)) { _ in
+            preferences.refresh()
+            showPermissions = true
+        }
         .ignoresSafeArea()
     }
 
@@ -127,6 +127,9 @@ private struct MainShell: View {
                 sidebarItem(.home)
                 sidebarItem(.history)
                 sidebarItem(.dictionary)
+                Button { NotificationCenter.default.post(name: .helloShowAgent, object: nil) } label: {
+                    Label("Agent 任务", systemImage: "sparkles").frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                }.buttonStyle(.plain)
             }
             Spacer(minLength: 24)
             sidebarItem(.settings)
@@ -219,7 +222,7 @@ private struct HomePage: View {
                 Rectangle().fill(LVTheme.border).frame(height: 1)
                 modeShortcut(title: "上下文听写", detail: "参考输入框与当前页面校对口述，只转成文字。", keys: ["Fn", "Control"], tint: .purple)
                 Rectangle().fill(LVTheme.border).frame(height: 1)
-                modeShortcut(title: "问任何问题", detail: "选中文字后提问，或直接说出问题。", keys: ["Fn", "Space"], tint: .green)
+                modeShortcut(title: "交给 Agent", detail: "说出任务，在气泡中查看执行进度。", keys: ["Fn", "Space"], tint: .green)
             }.padding(.horizontal, 16).padding(.vertical, 4)
                 .background(LVTheme.panel, in: RoundedRectangle(cornerRadius: 20))
             VStack(alignment: .leading, spacing: 12) {
@@ -227,7 +230,7 @@ private struct HomePage: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                     useCase("envelope.fill", color: .orange, title: "写邮件", detail: "说清来意和重点，把口述整理成一封自然的邮件。")
                     useCase("bubble.left.and.bubble.right.fill", color: .teal, title: "团队沟通", detail: "分享进展、补充细节，让沟通跟上你的思路。")
-                    useCase("sparkles", color: .purple, title: "语音提问", detail: "选中一段文字，用声音继续追问或请求修改。", mode: .ask)
+                    useCase("sparkles", color: .purple, title: "语音任务", detail: "搜索资料、整理文件，让 Agent 帮你完成。", mode: .ask)
                     useCase("doc.text.fill", color: .blue, title: "撰写文档", detail: "先说出段落和要点，再从文字工作台继续完善。")
                     useCase("message.fill", color: .green, title: "回复消息", detail: "把想说的话直接说出来，让日常回复更轻松。")
                     useCase("lightbulb.fill", color: .yellow, title: "梳理思路", detail: "带着一个想法开口，通过问答找到下一个方向。", mode: .ask)
@@ -498,7 +501,7 @@ private struct HistoryPage: View {
                 Picker("输入类型", selection: $filter) {
                     Text("全部记录").tag("all")
                     Text("语音输入").tag("dictate")
-                    Text("语音提问").tag("ask")
+                    Text("Agent / 旧问答").tag("ask")
                 }.labelsHidden().frame(width: 116)
             }.padding(.bottom, 20)
             if let error = library.errorMessage { InlineError(text: error).padding(.bottom, 10) }
@@ -846,6 +849,9 @@ private struct SettingsPage: View {
                             Image(systemName: categorySymbol(item)).resizable().scaledToFit().frame(width: 16, height: 16)
                             Text(item).font(.system(size: 14, weight: category == item ? .medium : .regular))
                             Spacer()
+                            if item == "权限" && !preferences.missingPermissions.isEmpty {
+                                Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+                            }
                         }.padding(.horizontal, 10).frame(height: 36).contentShape(Rectangle())
                     }.buttonStyle(SidebarButtonStyle(selected: category == item)).accessibilityLabel(item)
                 }
@@ -909,7 +915,7 @@ private struct SettingsPage: View {
             shortcutRow("语音输入", detail: "按下开始和停止语音输入。", keys: ["Fn"])
             shortcutRow("翻译", detail: "按 Fn＋Shift 后松开，开始语音翻译；再按 Fn 结束。", keys: ["Fn", "Shift"])
             shortcutRow("上下文听写", detail: "按 Fn＋Control 后松开，读取当前输入框与窗口；再按 Fn 结束。", keys: ["Fn", "Control"])
-            shortcutRow("问一问", detail: "按住 Fn，再按空格提问；再按 Fn 结束。", keys: ["Fn", "Space"])
+            shortcutRow("Agent", detail: "按住 Fn，再按空格说任务；再按 Fn 提交。", keys: ["Fn", "Space"])
         }
     }
     private func shortcutRow(_ title: String, detail: String, keys: [String]) -> some View {
@@ -1070,7 +1076,7 @@ private struct SettingsPage: View {
             settingsRow("天气默认城市", detail: "未指定城市时用于天气查询；留空则先询问城市。") {
                 TextField("例如：北京", text: $preferences.weatherCity).textFieldStyle(.roundedBorder).frame(width: 200)
             }
-            settingsRow("输入模式", detail: "选择口述、翻译或用声音提问。") {
+            settingsRow("输入模式", detail: "选择口述、翻译或 Agent 任务。") {
                 Picker("输入模式", selection: $model.mode) { ForEach(InputMode.allCases) { Text($0.title).tag($0) } }.labelsHidden().frame(width: 200).disabled(model.busy)
             }
             Button("设置快捷键权限", action: enableShortcut).buttonStyle(SurfaceButtonStyle()).padding(.top, 16)
@@ -1112,7 +1118,7 @@ private struct SettingsPage: View {
             VStack(alignment: .leading, spacing: 20) {
                 privacyNote("waveform", title: "语音识别", detail: "本地模型在 Mac 上处理录音；选择豆包云端时，录音会发送到豆包语音服务。保留历史时也会保存录音，用于回放和重试；删除记录会一并删除录音。")
                 privacyNote("rectangle.dashed", title: "上下文听写", detail: "仅在主动触发上下文听写时读取当前输入框。开启截图且获系统授权后，还会截取当前窗口。文字与截图发送到配置的文字服务，截图随历史保存在本机并遵循保留设置。")
-                privacyNote("text.bubble", title: "文字整理与问答", detail: "启用文字整理、翻译或提问时，识别文字及个人词典会发送给配置的文字处理服务。提问还会发送当前选中的文字作为上下文。")
+                privacyNote("text.bubble", title: "文字处理与 Agent", detail: "文字整理和翻译使用文字服务。Agent 使用单独配置的模型，发送任务、选文及执行所需内容。Agent 对话与会话缓存在本机独立保存，可在 Agent 设置中清空。")
                 privacyNote("externaldrive", title: "本机保存", detail: "历史记录和个人词典保存在这台 Mac。你可以单独删除记录和词语，或选择不保存新的历史记录。")
             }.padding(.top, 24)
         }
@@ -1297,11 +1303,11 @@ struct RecordingHUD: View {
     private var recordingContent: some View {
         VStack(spacing: 6) {
             if isAsking || model.mode == .context {
-                Label(model.mode == .context ? "上下文听写 · Fn ⌃" : "问一问 · Fn ␣", systemImage: model.mode == .context ? "rectangle.and.text.magnifyingglass" : "bubble.left.and.bubble.right.fill")
+                Label(model.mode == .context ? "上下文听写 · Fn ⌃" : "Agent · Fn ␣", systemImage: model.mode == .context ? "rectangle.and.text.magnifyingglass" : "bubble.left.and.bubble.right.fill")
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(askAccent)
                     .padding(.horizontal, 10).frame(height: 22)
                     .background(assistantBackground, in: Capsule())
-                    .accessibilityLabel(model.mode == .context ? "上下文听写，Fn 加 Control" : "问一问模式，Fn 加空格")
+                    .accessibilityLabel(model.mode == .context ? "上下文听写，Fn 加 Control" : "Agent 模式，Fn 加空格")
                     .help(model.mode == .context ? model.contextStatus : "语音问答")
             }
             if model.phase == .recording && model.mode == .translate {
@@ -1344,7 +1350,7 @@ struct RecordingHUD: View {
                     .overlay(alignment: .leading) { cancelButton.padding(.leading, 10) }
             } else {
                 if isAsking {
-                    Text("正在准备提问…").font(.system(size: 11)).foregroundStyle(.white)
+                    Text("正在准备任务…").font(.system(size: 11)).foregroundStyle(.white)
                 } else { Color.clear }
             }
         }

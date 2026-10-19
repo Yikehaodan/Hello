@@ -3,6 +3,7 @@ set -eu
 cd "$(dirname "$0")/.."
 [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || { print 'Hello 目前仅支持 Apple Silicon Mac。'; exit 1; }
 mkdir -p 'Hello.app/Contents/MacOS'
+zsh source/build-agent.sh
 # Remove the obsolete executable only in this generated bundle after the rename.
 rm -f 'Hello.app/Contents/MacOS/LightVoice' 'Hello.app/Contents/MacOS/Knock' 'Hello.app/Contents/Resources/Knock.icns'
 if [[ ! -x 'Hello.app/Contents/Resources/whisper-cli' || ! -x 'Hello.app/Contents/Resources/lightvoice-asr-worker' ]]; then

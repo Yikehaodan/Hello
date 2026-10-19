@@ -220,12 +220,6 @@ final class FnShortcut {
         longPressTimer?.invalidate(); longPressTimer = nil
         gesture = FnGesture(); pasteGesture = PasteLastGesture()
     }
-    func requestPermission() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-        refresh()
-    }
     func stop() {
         timer?.invalidate()
         resetGestures()

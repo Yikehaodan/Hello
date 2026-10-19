@@ -11,5 +11,6 @@ major=$(sw_vers -productVersion | cut -d. -f1)
 if check xcrun --find swiftc && check xcrun --show-sdk-path; then print '✓ Xcode 命令行工具'; else print '缺少 Xcode 命令行工具。请运行 xcode-select --install，完成后重试。'; (( failures += 1 )); fi
 if check cmake --version; then print '✓ CMake'; else print '缺少 CMake。可从 cmake.org 安装，或运行 brew install cmake。'; (( failures += 1 )); fi
 if check python3 -c 'import sys; assert sys.version_info >= (3,9)'; then print '✓ Python 3.9 或更新版本'; else print '需要 Python 3.9 或更新版本。可从 python.org 安装，或运行 brew install python。'; (( failures += 1 )); fi
+if check node -e 'if (Number(process.versions.node.split(".")[0]) < 22) process.exit(1)' && check npm --version; then print '✓ Node.js 22 或更新版本及 npm'; else print '构建 Agent 需要 Node.js 22 或更新版本及 npm，可从 nodejs.org 安装。'; (( failures += 1 )); fi
 if (( failures > 0 )); then exit 1; fi
-print '环境检查通过。首次构建需要访问 GitHub 和 PyPI；模型可在应用内按需下载。'
+print '环境检查通过。首次构建需要访问 GitHub、PyPI 和 npm；模型可在应用内按需下载。'

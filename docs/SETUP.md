@@ -4,17 +4,19 @@
 
 ## 环境
 
-需要 Apple Silicon Mac、macOS 14 或更新版本、Xcode 命令行工具、CMake，以及 Python 3.9 或更新版本。当前构建目标为 arm64。
+需要 Apple Silicon Mac、macOS 14 或更新版本、Xcode 命令行工具、CMake、Python 3.9 或更新版本，以及 Node.js 22 或更新版本。当前构建目标为 arm64。
 
 ```sh
 xcode-select --install
 # 如果已安装 Homebrew，可用它安装缺少的依赖。
-brew install cmake python
+brew install cmake python node
 zsh scripts/doctor.sh
 zsh scripts/setup.sh
 ```
 
-运行 `setup.sh` 会构建 Whisper 引擎、独立 Python 运行组件和 Swift 应用。独立组件用于模型管理与其他本地识别引擎，不向系统 Python 安装包。GitHub 和 PyPI 下载保存在 `.build-runtime/`，再次运行会复用已完成缓存。构建不需要语音或文字服务密钥。
+运行 `setup.sh` 会构建 Whisper 引擎、独立 Python 运行组件、Agent 运行组件和 Swift 应用。Python 组件用于模型管理与其他本地识别引擎，不向系统 Python 安装包。GitHub 和 PyPI 下载保存在 `.build-runtime/`，再次运行会复用已完成缓存。Agent 依赖从 npm 安装，构建不需要语音或文字服务密钥。
+
+构建脚本会将 Node.js 和 Claude Agent SDK 放入应用包。使用者无需另装 Node.js 或 Claude 桌面应用。若 Node.js 安装目录没有 `LICENSE`，可通过 `HELLO_AGENT_NODE_LICENSE` 指定对应版本的许可证文件。
 
 模型权重在应用内按需下载。新克隆的目录无需复制开发者的应用包、模型目录、签名证书或配置。
 
@@ -37,6 +39,8 @@ HELLO_LLM_MODEL=deepseek-flash
 文件是键值配置，不会作为脚本执行。手动创建后建议执行 `chmod 600`，限制为当前用户读写。应用内保存会自动设置此权限。
 
 模型需要兼容 Chat Completions。上下文截图要求支持图片输入；不同服务商支持的参数和返回格式可能不同，建议先在文本工作台试一段文字。
+
+Fn + Space 的 Agent 使用独立配置。它需要支持 Anthropic Messages 和工具调用的服务，可导入现有 DeepSeek Key。配置与验证方法见 [Agent 使用说明](AGENT.md)。
 
 ## 云端语音
 
@@ -73,7 +77,8 @@ HELLO_MODELS_DIR="/Volumes/Models/Hello" ./Hello.app/Contents/MacOS/Hello
 | --- | --- |
 | 找不到 Swift 或 SDK | 完成 Xcode 命令行工具安装，重新运行 doctor |
 | 找不到 CMake | 安装 CMake，再运行 setup |
-| GitHub 或 PyPI 下载失败 | 检查网络，再运行 setup；已完成缓存会复用 |
+| 找不到 Node.js 或 npm | 安装 Node.js 22 或更新版本，再运行 setup |
+| GitHub、PyPI 或 npm 下载失败 | 检查网络，再运行 setup；已完成缓存会复用 |
 | 模型下载失败 | 在应用内点击继续下载，具体方法见模型说明 |
 | 找不到模型 | 在“语音模型”中下载并选择一个模型，等待校验完成 |
 | API 返回错误 | 检查地址、密钥、模型名称和服务额度；原文会保留 |

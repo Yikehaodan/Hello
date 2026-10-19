@@ -15,6 +15,14 @@ struct GatewayRetryTests {
         let gateway = try Gateway(transport: transport, retryWait: { _ in }, onRetry: { attempt, limit in
             precondition(limit == 5); progress.append(attempt)
         })
+        for code in [200, 401, -1001] {
+            FaultTransport.reset([code, 200])
+            await gateway.warmupTransport()
+            precondition(FaultTransport.requests.count == 1 && FaultTransport.requests[0].isEmpty)
+            _ = try await gateway.polish("测试原文")
+            precondition(FaultTransport.requests.count == 2 && progress.isEmpty)
+        }
+        print("PASS: warmup uses the generation transport, sends no transcript, never retries and failures do not block generation")
         FaultTransport.reset([-1009, -1001, 502, 503, 429, 200])
         _ = try await gateway.polish("测试原文")
         precondition(progress == [1, 2, 3, 4, 5] && FaultTransport.requests.count == 6)

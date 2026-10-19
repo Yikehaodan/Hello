@@ -9,5 +9,12 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: source/agent-runtime/package-lock.json
+      - name: Install Agent runtime dependencies
+        run: npm ci --prefix source/agent-runtime --no-audit --no-fund
       - name: Isolated tests (no credentials or model downloads)
         run: zsh scripts/test.sh

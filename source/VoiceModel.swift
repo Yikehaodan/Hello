@@ -12,10 +12,15 @@ struct VoiceProcessingResult {
 final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVAudioPlayerDelegate {
     typealias TranscriptionOperation = @MainActor (URL, String, String) async throws -> String
     typealias ProcessingOperation = @MainActor (String, InputMode, String, String, String) async throws -> VoiceProcessingResult
-    typealias RecordingFactory = @MainActor (URL, [String: Any]) throws -> any VoiceRecording
+    typealias RecordingFactory = @MainActor (URL, [String: Any]) async throws -> any VoiceRecording
+    typealias DestinationCapture = @MainActor (Bool) async -> TextDestination?
+    typealias GatewayFactory = @MainActor (@escaping @MainActor (Int, Int) -> Void) throws -> Gateway
     enum Phase: String { case ready, authorizing, recording, transcribing, polishing }
     @Published var phase = Phase.ready {
         didSet {
+            if phase == .ready {
+                gatewayWarmup?.cancel(); gatewayWarmup = nil; sessionGateway = nil
+            }
             if phase != .ready { memoryCapture?.finish(); memoryCapture = nil }
             memory.setBusy(phase != .ready)
         }
@@ -40,12 +45,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     @Published private(set) var playingHistoryID: UUID?
     @Published var mode = InputMode.dictate
     @Published var showAnswer = false
+    // Hand off after transcription; Agent execution must not block ordinary dictation.
+    var onAgentRequest: (@MainActor (String, String) -> Void)?
     @Published private(set) var answerSources: [AnswerSource] = []
     @Published private(set) var answerLookupPerformed = false
     @Published private(set) var lookupStatus = ""
     @Published private(set) var contextStatus = ""
     private var sessionContext: VoiceContext?
-    private var pendingWeatherQuestion = ""
     @Published var language = UserDefaults.standard.string(forKey: "language") ?? "auto" {
         didSet { UserDefaults.standard.set(language, forKey: "language") }
     }
@@ -90,12 +96,15 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     private var modelPreparation: Task<Void, Never>?
     private var sessionSpeechModel = SpeechModelID.whisper
     private let recordingFactory: RecordingFactory
+    private let destinationCapture: DestinationCapture
     private var liveTranscription: LiveTranscription?
     private var cloudTranscription: CloudTranscription?
     private let cloudConfiguration: CloudSpeechConfiguration?
     private var liveSnapshot: Task<Void, Never>?
     private var warmup: Task<Void, Never>?
     private var gatewayWarmup: Task<Void, Never>?
+    private var sessionGateway: Gateway?
+    private let gatewayFactory: GatewayFactory
     private var nextSnapshotTime: Double = 0
     private let sessionRoot: URL
     private let requestMicrophoneAccess: @MainActor () async -> Bool
@@ -111,7 +120,9 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
          requestMicrophoneAccess: @escaping @MainActor () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
          transcriptionOperation: TranscriptionOperation? = nil, processingOperation: ProcessingOperation? = nil,
          asrResources: URL? = nil, cloudConfiguration: CloudSpeechConfiguration? = nil, speechModels: SpeechModelStore? = nil,
-         recordingFactory: @escaping RecordingFactory = { url, settings in try AVAudioRecorder(url: url, settings: settings) }) {
+         recordingFactory: @escaping RecordingFactory = { url, settings in try await AVAudioRecorder.makeForRecording(url: url, settings: settings) },
+         gatewayFactory: @escaping GatewayFactory = { try Gateway(onRetry: $0) },
+         destinationCapture: @escaping DestinationCapture = { await TextDestination.captureForRecording(includeSelection: $0) }) {
         let resolvedLibrary = library ?? LibraryStore()
         self.library = resolvedLibrary
         self.memory = MemoryStore(root: resolvedLibrary.dataDirectory)
@@ -128,6 +139,8 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         self.asr = LocalASR(resources: resources, modelURL: models.whisperModel)
         self.residentASR = ResidentASR(resources: resources, modelURL: models.whisperModel)
         self.recordingFactory = recordingFactory
+        self.destinationCapture = destinationCapture
+        self.gatewayFactory = gatewayFactory
         super.init()
         memory.consolidator = { evidence, existing in try await Gateway().consolidateMemory(evidence, existing: existing) }
         memory.onDisabled = { [weak self] in self?.memoryCapture?.cancel(); self?.memoryCapture = nil }
@@ -228,7 +241,8 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         let requestedSpeechModel = speechModels.selected
         showAnswer = false
         status = "正在准备麦克风……"
-        let newDestination = TextDestination.capture(includeSelection: requestedMode.isAssistant || requestedMode == .context)
+        let newDestination = await destinationCapture(requestedMode.isAssistant || requestedMode == .context)
+        guard session == token, !Task.isCancelled else { return }
         let newContext: VoiceContext?
         if requestedMode == .context {
             status = "正在读取当前输入框与页面……"
@@ -239,9 +253,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         sessionContext = newContext
         contextStatus = newContext?.captureStatus ?? ""
         let permitted = await requestMicrophoneAccess()
-        preferences.refresh()
         guard session == token, !Task.isCancelled else { return }
-        guard permitted else { sessionContext = nil; phase = .ready; status = "请在系统设置 → 隐私与安全性 → 麦克风中允许Hello。"; return }
+        // The permission monitor maintains settings. On the successful hot path,
+        // avoid synchronous screen-capture and accessibility permission IPC.
+        guard permitted else {
+            preferences.refreshPermissions()
+            sessionContext = nil; phase = .ready; status = "请在系统设置 → 隐私与安全性 → 麦克风中允许Hello。"; return
+        }
         if transcriptionOperation == nil, let problem = speechModelProblem(requestedSpeechModel, language: requestedLanguage) {
             sessionContext = nil; phase = .ready; status = problem; return
         }
@@ -250,9 +268,16 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16000.0,
                 AVNumberOfChannelsKey: 1, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false,
                 AVLinearPCMIsBigEndianKey: false]
-            let capture = try recordingFactory(audio, settings)
+            let capture = try await recordingFactory(audio, settings)
+            guard session == token, !Task.isCancelled else {
+                capture.stop(); try? FileManager.default.removeItem(at: audio); return
+            }
             capture.delegate = self; capture.isMeteringEnabled = true
-            guard capture.prepareToRecord(), capture.record() else { throw VoiceError.message("无法启动麦克风，请检查系统声音输入。") }
+            do { try await capture.startRecording() }
+            catch { capture.stop(); throw error }
+            guard session == token, !Task.isCancelled else {
+                capture.stop(); try? FileManager.default.removeItem(at: audio); return
+            }
             discardSessionAudio()
             sessionHistoryID = nil
             historySavePending = false; sessionSucceeded = false; sessionCancelled = false
@@ -262,8 +287,9 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             recorder = capture; audioURL = audio; hasRecording = false
             raw = ""; result = ""; seconds = 0; peakPower = -160
             beginLiveTranscription(token: token)
-            if processingOperation == nil, sessionMode != .dictate || autoPolish {
-                gatewayWarmup = Task { if let gateway = try? Gateway() { await gateway.warmupTransport() } }
+            if processingOperation == nil, sessionMode != .dictate || autoPolish,
+               !(sessionMode == .ask && onAgentRequest != nil) {
+                beginGatewayWarmup(token: token)
             }
             phase = .recording
             if soundEnabled { NSSound(named: "Tink")?.play() }
@@ -278,9 +304,10 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             meter = samplingTimer
             RunLoop.main.add(samplingTimer, forMode: .common)
         } catch {
+            try? FileManager.default.removeItem(at: audio)
+            guard session == token, !Task.isCancelled else { return }
             sessionContext = nil
             phase = .ready; status = error.localizedDescription
-            try? FileManager.default.removeItem(at: audio)
         }
     }
     private func sampleRecorder() {
@@ -340,7 +367,29 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         cloudTranscription?.cancel(); cloudTranscription = nil
         managedStream?.cancel(); managedStream = nil
         warmup?.cancel(); warmup = nil
-        gatewayWarmup?.cancel(); gatewayWarmup = nil
+    }
+    private func gateway(for token: UUID) throws -> Gateway {
+        if let sessionGateway { return sessionGateway }
+        let gateway = try gatewayFactory { [weak self] attempt, limit in
+            guard let self, self.session == token, !Task.isCancelled else { return }
+            self.apiRetryAttempt = attempt
+            self.status = "API 连接暂时失败，正在重试（\(attempt)/\(limit)）……"
+        }
+        sessionGateway = gateway
+        return gateway
+    }
+    private func beginGatewayWarmup(token: UUID) {
+        gatewayWarmup?.cancel()
+        gatewayWarmup = Task { [weak self] in
+            guard let self, self.session == token, let gateway = try? self.gateway(for: token) else { return }
+            // Keep the same transport warm during long recordings. Stopping ASR must
+            // not cancel an in-flight handshake; generation never waits for this task.
+            while self.session == token, self.phase == .recording, !Task.isCancelled {
+                await gateway.warmupTransport()
+                guard self.session == token, self.phase == .recording, !Task.isCancelled else { return }
+                do { try await Task.sleep(for: .seconds(20)) } catch { return }
+            }
+        }
     }
     private func transcribeComplete(_ audio: URL, allowCloud: Bool = true) async throws -> String {
         if sessionSpeechModel.usesManagedRuntime {
@@ -482,6 +531,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     private func processText(_ text: String, token: UUID, deliver: Bool) async -> Bool {
         guard session == token, !Task.isCancelled else { return false }
+        if sessionMode == .ask, let onAgentRequest {
+            canRetryProcessing = false; apiRetryAttempt = 0
+            onAgentRequest(text, destination?.selectedText ?? "")
+            result = "任务已交给 Agent，可在气泡中查看进度和结果。"
+            phase = .ready; status = result
+            return true
+        }
         apiRetryAttempt = 0; canRetryProcessing = false
         answerSources = []; answerLookupPerformed = false; lookupStatus = ""
         defer { if session == token { apiRetryAttempt = 0; lookupStatus = "" } }
@@ -498,11 +554,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                                                           library.dictionaryPrompt, destination?.selectedText ?? "")
                 output = answer.text; replacesSelection = answer.replacesSelection
             } else {
-                let gateway = try Gateway(onRetry: { [weak self] attempt, limit in
-                    guard let self, self.session == token, !Task.isCancelled else { return }
-                    self.apiRetryAttempt = attempt
-                    self.status = "API 连接暂时失败，正在重试（\(attempt)/\(limit)）……"
-                })
+                let gateway = try gateway(for: token)
                 switch sessionMode {
                 case .dictate: output = try await gateway.polish(text, dictionary: library.dictionaryPrompt, memory: memory.prompt(for: text, mode: sessionMode.rawValue))
                 case .translate: output = try await gateway.translate(text, to: sessionTargetLanguage, dictionary: library.dictionaryPrompt, memory: memory.prompt(for: text, mode: sessionMode.rawValue))
@@ -510,17 +562,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                     output = try await gateway.polish(text, dictionary: library.dictionaryPrompt,
                         context: sessionContext ?? VoiceContext(captureStatus: contextStatus), memory: memory.prompt(for: text, mode: sessionMode.rawValue))
                 case .ask:
-                    let answer = try await gateway.ask(text, selectedText: destination?.selectedText ?? "",
-                        defaultCity: preferences.weatherCity, pendingQuestion: pendingWeatherQuestion,
-                        memory: memory.prompt(for: text, mode: sessionMode.rawValue),
-                        onLookup: { [weak self] message in
-                            guard let self, self.session == token, !Task.isCancelled else { return }
-                            self.lookupStatus = message; self.status = message + "……"; self.apiRetryAttempt = 0
-                        })
-                    guard session == token, !Task.isCancelled else { return false }
-                    answerSources = answer.sources; answerLookupPerformed = answer.lookupPerformed
-                    pendingWeatherQuestion = answer.followupQuestion ?? ""
-                    output = answer.text; replacesSelection = answer.replacesSelection
+                    throw VoiceError.message("Agent 尚未就绪，请从 Hello 菜单打开 Agent 设置。")
                 }
             }
             guard session == token, !Task.isCancelled else { return false }
@@ -607,6 +649,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         status = "已复制，可按 ⌘V 粘贴。"
     }
     func pasteLastResult() -> Bool {
+        guard !(sessionMode == .ask && onAgentRequest != nil) else { return false }
         guard !busy, !result.isEmpty, let target = TextDestination.capture() else { return false }
         status = target.insert(result)
         return true

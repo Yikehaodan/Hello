@@ -77,6 +77,16 @@ enum MicrophonePermission: Equatable {
 }
 
 enum MicrophoneCatalog {
+    static var permission: MicrophonePermission {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return .authorized
+        case .denied: return .denied
+        case .restricted: return .restricted
+        case .notDetermined: return .notDetermined
+        @unknown default: return .restricted
+        }
+    }
+
     // Discovery and authorizationStatus only read state; neither starts recording nor requests permission.
     static func snapshot() -> MicrophoneSnapshot {
         let defaultID = AVCaptureDevice.default(for: .audio)?.uniqueID
@@ -88,15 +98,26 @@ enum MicrophoneCatalog {
             if $0.isDefault != $1.isDefault { return $0.isDefault }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        let permission: MicrophonePermission
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
-        case .authorized: permission = .authorized
-        case .denied: permission = .denied
-        case .restricted: permission = .restricted
-        case .notDetermined: permission = .notDetermined
-        @unknown default: permission = .restricted
-        }
         return MicrophoneSnapshot(devices: microphones, permission: permission)
+    }
+}
+
+enum AppPermission: String, Identifiable {
+    case microphone, accessibility, screenCapture
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .microphone: return "麦克风"
+        case .accessibility: return "辅助功能"
+        case .screenCapture: return "屏幕录制"
+        }
+    }
+    var settingsPane: String {
+        switch self {
+        case .microphone: return "Privacy_Microphone"
+        case .accessibility: return "Privacy_Accessibility"
+        case .screenCapture: return "Privacy_ScreenCapture"
+        }
     }
 }
 
@@ -115,6 +136,16 @@ final class AppPreferences: ObservableObject {
     @Published private(set) var requestingMicrophone = false
     @Published private(set) var permissionIntroDismissed: Bool
     var needsRequiredPermissions: Bool { microphones.permission != .authorized || !accessibilityAllowed }
+    var missingPermissions: [AppPermission] {
+        var missing: [AppPermission] = []
+        if microphones.permission != .authorized { missing.append(.microphone) }
+        if !accessibilityAllowed { missing.append(.accessibility) }
+        if contextScreenshots && !screenCaptureAllowed { missing.append(.screenCapture) }
+        return missing
+    }
+    var permissionSummary: String {
+        missingPermissions.isEmpty ? "所需权限已就绪" : "待设置：" + missingPermissions.map(\.title).joined(separator: "、")
+    }
     @Published private(set) var showDockIcon: Bool
     @Published private(set) var microphones: MicrophoneSnapshot
     @Published private(set) var settingsError: String?
@@ -128,48 +159,90 @@ final class AppPreferences: ObservableObject {
     private let defaults: UserDefaults
     private let loginItems: any LoginItemManaging
     private let microphoneProvider: () -> MicrophoneSnapshot
+    private let microphonePermissionProvider: () -> MicrophonePermission
     private let openURL: (URL) -> Bool
     private let accessibilityProvider: () -> Bool
     private let screenCaptureProvider: () -> Bool
     private let screenCaptureRequest: () -> Bool
     private let microphoneRequest: () async -> Bool
+    private let accessibilityRequest: () -> Void
+    private var permissionMonitor: Task<Void, Never>?
     private static let dockKey = "showDockIcon"
 
     init(defaults: UserDefaults = .standard,
          loginItems: (any LoginItemManaging)? = nil,
-         microphoneProvider: @escaping () -> MicrophoneSnapshot = MicrophoneCatalog.snapshot,
+         microphoneProvider: (() -> MicrophoneSnapshot)? = nil,
          openURL: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
          accessibilityProvider: @escaping () -> Bool = { AXIsProcessTrusted() },
          screenCaptureProvider: @escaping () -> Bool = { CGPreflightScreenCaptureAccess() },
          screenCaptureRequest: @escaping () -> Bool = { CGRequestScreenCaptureAccess() },
-         microphoneRequest: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) }) {
+         microphoneRequest: @escaping () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
+         accessibilityRequest: @escaping () -> Void = {
+             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+             _ = AXIsProcessTrustedWithOptions(options)
+         }) {
         let service = loginItems ?? SystemLoginItemManager()
         self.defaults = defaults
         self.weatherCity = defaults.string(forKey: "weatherCity") ?? ""
         self.contextScreenshots = defaults.object(forKey: "contextScreenshots") as? Bool ?? false
         self.loginItems = service
-        self.microphoneProvider = microphoneProvider
+        self.microphoneProvider = microphoneProvider ?? MicrophoneCatalog.snapshot
+        // Poll authorization without rediscovering audio devices every two seconds.
+        self.microphonePermissionProvider = microphoneProvider.map { provider in { provider().permission } }
+            ?? { MicrophoneCatalog.permission }
         self.openURL = openURL
         self.accessibilityProvider = accessibilityProvider
         self.screenCaptureProvider = screenCaptureProvider
         self.screenCaptureRequest = screenCaptureRequest
         self.microphoneRequest = microphoneRequest
+        self.accessibilityRequest = accessibilityRequest
         self.accessibilityAllowed = accessibilityProvider()
         self.screenCaptureAllowed = screenCaptureProvider()
         self.permissionIntroDismissed = defaults.bool(forKey: "knockPermissionIntroDismissed")
         self.loginItemState = service.state
         self.showDockIcon = defaults.object(forKey: Self.dockKey) as? Bool ?? true
-        self.microphones = microphoneProvider()
+        self.microphones = self.microphoneProvider()
+    }
+
+    deinit { permissionMonitor?.cancel() }
+
+    func startPermissionMonitoring(pollInterval: Duration = .seconds(2)) {
+        guard permissionMonitor == nil else { return }
+        refreshPermissions()
+        permissionMonitor = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: pollInterval) }
+                catch { return }
+                guard let self else { return }
+                self.refreshPermissions()
+            }
+        }
+    }
+
+    func stopPermissionMonitoring() {
+        permissionMonitor?.cancel()
+        permissionMonitor = nil
+    }
+
+    // Read-only checks also run while System Settings is in front. Publish only changes.
+    func refreshPermissions() {
+        let screen = screenCaptureProvider(), accessibility = accessibilityProvider()
+        let microphone = microphonePermissionProvider()
+        if screenCaptureAllowed != screen { screenCaptureAllowed = screen }
+        if accessibilityAllowed != accessibility { accessibilityAllowed = accessibility }
+        if microphones.permission != microphone {
+            microphones = MicrophoneSnapshot(devices: microphones.devices, permission: microphone)
+        }
     }
 
     // Safe to call when settings opens or the app becomes active. Never changes login registration.
     func refresh() {
-        screenCaptureAllowed = screenCaptureProvider()
-        accessibilityAllowed = accessibilityProvider()
+        refreshPermissions()
         let updatedState = loginItems.state
         if loginItemState != updatedState { loginItemError = nil }
-        loginItemState = updatedState
-        microphones = microphoneProvider()
+        if loginItemState != updatedState { loginItemState = updatedState }
+        let snapshot = microphoneProvider()
+        if microphones != snapshot { microphones = snapshot }
     }
 
     // Bind the settings toggle setter to this method. Never invoke from startup or restoration.
@@ -226,10 +299,25 @@ final class AppPreferences: ObservableObject {
         _ = screenCaptureRequest()
         screenCaptureAllowed = screenCaptureProvider()
         if !screenCaptureAllowed {
-            guard openURL(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!) else {
-                settingsError = "请手动打开系统设置 → 隐私与安全性 → 屏幕与系统音频录制（或屏幕录制）。"
-                return
-            }
+            openPrivacySettings(for: .screenCapture)
+        }
+    }
+
+    func requestAccessibility() {
+        settingsError = nil
+        refreshPermissions()
+        guard !accessibilityAllowed else { return }
+        accessibilityRequest()
+        refreshPermissions()
+        if !accessibilityAllowed { openPrivacySettings(for: .accessibility) }
+    }
+
+    func openPrivacySettings(for permission: AppPermission) {
+        settingsError = nil
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(permission.settingsPane)")!
+        if !openURL(url) {
+            let pane = permission == .screenCapture ? "屏幕与系统音频录制（或屏幕录制）" : permission.title
+            settingsError = "未能打开\(permission.title)设置，请手动打开系统设置 → 隐私与安全性 → \(pane)。"
         }
     }
 
@@ -249,10 +337,6 @@ final class AppPreferences: ObservableObject {
     }
 
     func openMicrophonePrivacySettings() {
-        settingsError = nil
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"), openURL(url) else {
-            settingsError = "未能打开麦克风设置，请手动打开系统设置 → 隐私与安全性 → 麦克风。"
-            return
-        }
+        openPrivacySettings(for: .microphone)
     }
 }

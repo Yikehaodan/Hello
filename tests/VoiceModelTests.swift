@@ -2,7 +2,8 @@ import Foundation
 
 @MainActor
 private final class UnusedLoginItems: LoginItemManaging {
-    var state: LoginItemState { .notRegistered }
+    private(set) var stateReads = 0
+    var state: LoginItemState { stateReads += 1; return .notRegistered }
     func register() throws { preconditionFailure("Controller test must not change login registration") }
     func unregister() throws { preconditionFailure("Controller test must not change login registration") }
     func openSettings() { preconditionFailure("Controller test must not open System Settings") }
@@ -58,9 +59,11 @@ struct VoiceModelTests {
         let preferencesSuite = "LightVoice.ControllerPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: preferencesSuite)!
         defer { defaults.removePersistentDomain(forName: preferencesSuite) }
-        let preferences = AppPreferences(defaults: defaults, loginItems: UnusedLoginItems(),
+        let loginItems = UnusedLoginItems()
+        let preferences = AppPreferences(defaults: defaults, loginItems: loginItems,
             microphoneProvider: { MicrophoneSnapshot(devices: [], permission: .notDetermined) }, openURL: { _ in false })
         let model = VoiceModel(library: library, sessionRoot: recordings, preferences: preferences, requestMicrophoneAccess: { await gate.request() })
+        let initialLoginReads = loginItems.stateReads
         check(model.preferences === preferences, "native preferences dependency is preserved")
 
         model.toggle()
@@ -94,6 +97,7 @@ struct VoiceModelTests {
         gate.resolve(2, allowed: false)
         await eventually("denied permission returns ready") { model.phase == .ready }
         check(model.status.contains("麦克风") && !model.hasRecording, "permission denial is reported without recording")
+        check(loginItems.stateReads == initialLoginReads, "Fn startup and canceled authorization never perform a full settings refresh")
 
         model.raw = "需要整理的原文"
         model.result = "先前结果"

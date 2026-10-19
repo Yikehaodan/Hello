@@ -1,6 +1,16 @@
 import AppKit
 import ApplicationServices
 
+// AX references are immutable handles. Capture them on a dedicated queue and
+// transfer the completed snapshot to the main actor; never query both at once.
+private struct DestinationSnapshot: @unchecked Sendable {
+    let window: AXUIElement?
+    let selectedText: String
+    let selectionElement: AXUIElement?
+    let selectionRange: CFRange?
+}
+private let destinationCaptureQueue = DispatchQueue(label: "Hello.destination-capture", qos: .userInitiated)
+
 /// 保存触发录音的应用和窗口。输入时使用该窗口当前的光标，不激活或抢走焦点。
 @MainActor
 struct TextDestination {
@@ -166,7 +176,32 @@ struct TextDestination {
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               app.bundleIdentifier == nil || Bundle.main.bundleIdentifier == nil ||
                 app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
-        let element = AXUIElementCreateApplication(app.processIdentifier)
+        let snapshot = captureSnapshot(pid: app.processIdentifier, includeSelection: includeSelection)
+        return TextDestination(pid: app.processIdentifier, name: app.localizedName ?? "原来的应用",
+                               window: snapshot.window, selectedText: snapshot.selectedText,
+                               selectionElement: snapshot.selectionElement, selectionRange: snapshot.selectionRange)
+    }
+
+    static func captureForRecording(includeSelection: Bool = false) async -> TextDestination? {
+        guard !Task.isCancelled, let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+              app.bundleIdentifier == nil || Bundle.main.bundleIdentifier == nil ||
+                app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+        // Pin the destination before suspension so changing focus never retargets a paste.
+        let pid = app.processIdentifier, name = app.localizedName ?? "原来的应用"
+        let snapshot = await withCheckedContinuation { continuation in
+            destinationCaptureQueue.async {
+                continuation.resume(returning: captureSnapshot(pid: pid, includeSelection: includeSelection))
+            }
+        }
+        guard !Task.isCancelled else { return nil }
+        return TextDestination(pid: pid, name: name, window: snapshot.window,
+                               selectedText: snapshot.selectedText, selectionElement: snapshot.selectionElement,
+                               selectionRange: snapshot.selectionRange)
+    }
+
+    nonisolated private static func captureSnapshot(pid: pid_t, includeSelection: Bool) -> DestinationSnapshot {
+        let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.3)
         let focused = includeSelection ? axElement(element, kAXFocusedUIElementAttribute) : nil
         var selection = ""
@@ -180,10 +215,9 @@ struct TextDestination {
                 }
             }
         }
-        return TextDestination(pid: app.processIdentifier, name: app.localizedName ?? "原来的应用",
-                               window: axElement(element, kAXFocusedWindowAttribute),
-                               selectedText: selection, selectionElement: focused,
-                               selectionRange: focused.flatMap { selectedRange($0) })
+        return DestinationSnapshot(window: axElement(element, kAXFocusedWindowAttribute),
+                                   selectedText: selection, selectionElement: focused,
+                                   selectionRange: focused.flatMap { selectedRange($0) })
     }
 
     func insert(_ text: String, requireOriginalSelection: Bool = false) -> String {
@@ -258,7 +292,7 @@ struct TextDestination {
         return text
     }
 
-    private static func selectedRange(_ element: AXUIElement) -> CFRange? {
+    nonisolated private static func selectedRange(_ element: AXUIElement) -> CFRange? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
@@ -266,7 +300,7 @@ struct TextDestination {
         return AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cfRange, &range) ? range : nil
     }
 
-    private static func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
+    nonisolated private static func axElement(_ parent: AXUIElement, _ attribute: String) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(parent, attribute as CFString, &value) == .success,
               let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }

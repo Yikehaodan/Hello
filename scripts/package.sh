@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 resources = Path(sys.argv[1]) / 'Contents/Resources'
 allowed = {'Hello.icns', 'SpeechModels', 'SpeechRuntime', 'whisper-cli',
-           'lightvoice-asr-worker', 'whisper-LICENSE.txt', 'THIRD_PARTY_NOTICES.md'}
+           'lightvoice-asr-worker', 'whisper-LICENSE.txt', 'THIRD_PARTY_NOTICES.md', 'AgentRuntime'}
 extra = {p.name for p in resources.iterdir()} - allowed
 model_files = {p.name for p in (resources / 'SpeechModels').iterdir()}
 expected = {'model_manager.py', 'speech_worker.py', 'models.json'}

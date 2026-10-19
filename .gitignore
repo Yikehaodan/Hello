@@ -29,3 +29,6 @@ __pycache__/
 # Personal correction memory stays on the user's Mac.
 memory.md
 !docs/MEMORY.md
+
+# Agent dependencies are installed from the pinned lockfile.
+/source/agent-runtime/node_modules/
