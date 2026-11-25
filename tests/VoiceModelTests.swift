@@ -281,7 +281,9 @@ struct VoiceModelTests {
 
         // The add-history path has the same commit contract even when only typed text exists.
         let addRoot = sandbox.appendingPathComponent("blocked-new-library")
+        let addBackup = sandbox.appendingPathComponent("blocked-new-library-backup")
         let addLibrary = LibraryStore(root: addRoot)
+        try FileManager.default.moveItem(at: addRoot, to: addBackup)
         try Data("blocked new history directory".utf8).write(to: addRoot)
         let addModel = VoiceModel(library: addLibrary, sessionRoot: sandbox.appendingPathComponent("add-sessions"), preferences: preferences,
             requestMicrophoneAccess: { preconditionFailure("No capture in persistence tests") },
@@ -291,6 +293,7 @@ struct VoiceModelTests {
         await eventually("new history save fails") { addModel.phase == .ready }
         check(addLibrary.history.isEmpty && !addModel.prepareForTermination(), "failed first history insertion blocks silent termination")
         try FileManager.default.removeItem(at: addRoot)
+        try FileManager.default.moveItem(at: addBackup, to: addRoot)
         check(addModel.prepareForTermination() && addLibrary.history.count == 1 && addLibrary.history[0].succeeded,
               "retrying a first insertion commits one successful entry")
         check(addModel.prepareForTermination() && addLibrary.history.count == 1, "repeated termination checks do not duplicate history")

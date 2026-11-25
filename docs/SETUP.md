@@ -52,6 +52,14 @@ Fn + Space 的 Agent 使用独立配置。它需要支持 Anthropic Messages 和
 
 新安装的数据目录为 `~/Library/Application Support/Hello/`。从 Knock 或更早版本升级时，继续使用已有的 `LightVoice/` 或 `Knock/` 目录，保留词典、历史和下载的模型。两者都存在时，沿用旧版规则，优先使用 `LightVoice/`。实际目录以设置页显示为准。
 
+历史、词典和记忆使用内置 SQLite，用户无需另装数据库。`records.sqlite` 保存听写、词典和记忆，`Agent/records.sqlite` 保存 Agent 对话，`history-index.sqlite` 是统一历史的查询缓存。列表每批查询 50 条，搜索在后台执行。
+
+首次升级自动导入旧 `library.json`、`memory.md` 和 `Agent/tasks.json`。原文件保持不变，并在各自目录的 `MigrationBackups` 中保留副本。事务成功后才切换到数据库；读取或迁移失败会显示错误并阻止覆盖。迁移后删除当前记录不会修改这些旧副本。
+
+备份当前数据时先退出应用，再复制整个数据目录；不要在应用运行时只复制 `.sqlite` 文件，因为最新事务可能仍在旁边的 `-wal` 文件中。
+
+数据库迁移、分页和查询回归测试：`zsh tests/test-database.sh`。词典、保留期限与记忆学习规则分别由 `tests/test-library.sh` 和 `tests/test-memory.sh` 验证。
+
 | 可选环境变量 | 用途 |
 | --- | --- |
 | `HELLO_DATA_DIR` | 数据与配置目录，使用绝对路径 |
@@ -86,10 +94,10 @@ HELLO_MODELS_DIR="/Volumes/Models/Hello" ./Hello.app/Contents/MacOS/Hello
 
 构建产物默认使用临时签名，尚未经过 Apple 公证。请在固定位置运行应用，授权问题参见 [macOS 权限](PERMISSIONS.md)。
 
-高级搜索适配器读取配置目录中的 `search.json`，它面向特定搜索协议，不是通用搜索 API。普通听写与翻译不依赖它。构建默认不会读取本机搜索配置；仅显式设置 `HELLO_SEARCH_CONFIG` 时，为指定 HTTP 搜索主机生成单独的网络例外。
+Agent 联网搜索使用 DeepSeek 官方接口的 WebSearch 和 WebFetch。旧搜索适配器已移除，`search.json` 与 `HELLO_SEARCH_CONFIG` 不再使用。
 
 ## 打包发布
 
 在干净的源码目录运行 `zsh scripts/package.sh`，脚本会构建应用、验证签名，并生成 `dist/Hello-<版本>-macOS-arm64.dmg` 和对应 `.sha256` 文件。DMG 包含应用、“应用程序”快捷方式与安装说明。生成目录不会提交到 Git。
 
-脚本拒绝包含旧模型或额外顶层资源的应用包，也不接受私人搜索配置。它不会执行 Apple 公证；默认临时签名的产物需要在 Release 中说明首次打开要求。`CODE_SIGN_IDENTITY` 只指定构建签名身份，不代表已完成公证。
+脚本拒绝包含旧模型或额外顶层资源的应用包。它不会执行 Apple 公证；默认临时签名的产物需要在 Release 中说明首次打开要求。`CODE_SIGN_IDENTITY` 只指定构建签名身份，不代表已完成公证。

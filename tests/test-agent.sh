@@ -9,7 +9,7 @@ cat > "$test_temp/overlay.json" <<JSON
 JSON
 sources=(source/*.swift)
 sources=("${(@)sources:#source/main.swift}")
-for excluded in Views AgentViews PreviewRenderer ServiceSettingsView MemoryView PermissionsView; do
+for excluded in PreviewRenderer; do
     sources=("${(@)sources:#source/${excluded}.swift}")
 done
 xcrun swiftc -vfsoverlay "$test_temp/overlay.json" -module-cache-path "${TMPDIR:-/tmp}/lightvoice-module-cache" -target arm64-apple-macos14.0 "${sources[@]}" tests/AgentTests.swift -o "$test_temp/agent-tests" -lz -framework AppKit -framework SwiftUI -framework AVFoundation -framework ApplicationServices -framework ServiceManagement

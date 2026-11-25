@@ -16,7 +16,7 @@ struct PermissionWarningBanner: View {
                 Label(preferences.permissionSummary, systemImage: "exclamationmark.shield")
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                Button("查看引导", action: showDetails).buttonStyle(.link)
+                Button("查看引导", action: showDetails).buttonStyle(QuietButtonStyle())
             }
             HStack(spacing: 10) {
                 ForEach(preferences.missingPermissions) { permission in
@@ -30,12 +30,12 @@ struct PermissionWarningBanner: View {
                     }
                     .disabled(permission == .microphone && preferences.requestingMicrophone)
                 }
-            }.controlSize(.small)
+            }.buttonStyle(SurfaceButtonStyle(compact: true))
             if let error = preferences.settingsError {
                 Text(error).font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(12).background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+        .padding(12).background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -77,13 +77,13 @@ struct PermissionChecklist: View {
                           state: preferences.screenCaptureAllowed ? "已允许" : preferences.contextScreenshots ? "待授权" : "未授权 · 可选",
                           allowed: preferences.screenCaptureAllowed,
                           needsAttention: preferences.contextScreenshots,
-                          detail: "开启截图选项后，仅在上下文听写时截取当前窗口。截图和输入框文字会发送到你配置的文字服务，帮助校对口述；截图可随历史保存在本机。",
+                          detail: "开启截图选项后，Fn 和 Fn＋Space 会截取当前窗口。截图与输入框文字会发送到对应的文字或 Agent 服务；截图可随历史保存在本机。",
                           guidance: "在“屏幕与系统音频录制”（或“屏幕录制”）中开启 Hello。若系统要求退出并重新打开，请按提示操作。",
                           actionTitle: preferences.screenCaptureAllowed ? "打开设置" : "前往授权") {
                 if preferences.screenCaptureAllowed { preferences.openPrivacySettings(for: .screenCapture) }
                 else { preferences.requestScreenCapture() }
             }
-            Toggle("上下文听写附带窗口截图", isOn: $preferences.contextScreenshots)
+            Toggle("上下文听写与 Agent 附带窗口截图", isOn: $preferences.contextScreenshots)
                 .toggleStyle(.switch).font(.system(size: 13))
             Text("截图开关与系统授权相互独立。两者都开启后才会截图；不授权也能使用普通听写、翻译和语音提问。")
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -94,7 +94,7 @@ struct PermissionChecklist: View {
             HStack {
                 Text("系统设置 → 隐私与安全性")
                 Spacer()
-                Button("重新检查", action: preferences.refresh).buttonStyle(.link)
+                Button("重新检查", action: preferences.refresh).buttonStyle(QuietButtonStyle())
             }.font(.system(size: 12)).foregroundStyle(.secondary)
             Text("授权后返回 Hello 会自动更新状态。若仍未生效，请退出并重新打开；更新或移动应用后，可能需要重新添加 Hello。系统中屏幕权限也可能显示为“屏幕与系统音频录制”，Hello 不录制系统音频。")
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -125,8 +125,8 @@ struct PermissionChecklist: View {
                                guidance: String, actionTitle: String,
                                action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: symbol).font(.system(size: 19)).foregroundStyle(.indigo)
-                .frame(width: 38, height: 38).background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
+            Image(systemName: symbol).font(.system(size: 19)).foregroundStyle(LVTheme.accent)
+                .frame(width: 38, height: 38).background(LVTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     Text(title).font(.system(size: 14, weight: .semibold))
@@ -141,10 +141,10 @@ struct PermissionChecklist: View {
                     Text(guidance).font(.system(size: 11)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Button(actionTitle, action: action).controlSize(.small)
+                Button(actionTitle, action: action).buttonStyle(SurfaceButtonStyle(compact: true))
                     .accessibilityLabel(title + "：" + actionTitle)
             }
-        }.padding(14).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+        }.padding(14).background(LVTheme.thin, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -155,7 +155,7 @@ struct PermissionWelcome: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Image(systemName: "door.left.hand.open").font(.system(size: 28)).foregroundStyle(.indigo)
+                Image(systemName: "door.left.hand.open").font(.system(size: 28)).foregroundStyle(LVTheme.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Hello 权限设置").font(.system(size: 23, weight: .semibold))
                     Text("查看授权状态，按需开启每项权限。").font(.system(size: 13)).foregroundStyle(.secondary)
@@ -166,9 +166,9 @@ struct PermissionWelcome: View {
                 Text("你可以随时在“设置 → 权限”中调整。").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button(preferences.missingPermissions.isEmpty ? "完成" : "稍后设置", action: close)
-                    .keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).tint(.indigo)
+                    .keyboardShortcut(.defaultAction).buttonStyle(SurfaceButtonStyle(prominent: true)).tint(LVTheme.accent)
             }
-        }.padding(28).frame(width: 600, height: 690)
-            .background(Color(nsColor: .windowBackgroundColor))
+        }.padding(28).frame(width: 600, height: 690).tint(LVTheme.accent).foregroundStyle(LVTheme.text)
+            .background(LVTheme.background)
     }
 }

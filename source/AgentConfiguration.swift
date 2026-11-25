@@ -1,5 +1,4 @@
 import Foundation
-import Security
 import CryptoKit
 
 struct AgentConfiguration: Codable, Equatable {
@@ -8,6 +7,21 @@ struct AgentConfiguration: Codable, Equatable {
     var auth = "bearer"
     var credentialDigest: String?
     var workspace = AppPaths.data.appendingPathComponent("AgentWorkspace").path
+    var permissionMode = "bypassPermissions"
+    var computerEnabled = true
+    init() {}
+    private enum CodingKeys: String, CodingKey { case baseURL, model, auth, credentialDigest, workspace, permissionMode, computerEnabled }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        model = try c.decode(String.self, forKey: .model)
+        auth = try c.decode(String.self, forKey: .auth)
+        credentialDigest = try c.decodeIfPresent(String.self, forKey: .credentialDigest)
+        workspace = try c.decode(String.self, forKey: .workspace)
+        // Existing installations retain their previous approval behavior until explicitly changed.
+        permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode) ?? "default"
+        computerEnabled = try c.decodeIfPresent(Bool.self, forKey: .computerEnabled) ?? true
+    }
     var fingerprint: String { baseURL + "|" + model + "|" + workspace }
 
     func validated(key: String) throws -> AgentConfiguration {
@@ -19,7 +33,7 @@ struct AgentConfiguration: Codable, Equatable {
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               !value.model.isEmpty, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               ![value.model, key, value.baseURL].contains(where: { $0.contains("\n") || $0.contains("\r") }),
-              ["bearer", "apiKey"].contains(auth), workspace.hasPrefix("/") else {
+              ["default", "bypassPermissions"].contains(permissionMode), ["bearer", "apiKey"].contains(auth), workspace.hasPrefix("/") else {
             throw AgentError.message("请填写有效的模型地址、API Key、模型名称和绝对工作目录。服务需支持 Anthropic Messages；本机服务可使用 HTTP。")
         }
         if url.path.hasSuffix("/messages") || url.path.hasSuffix("/chat/completions") {
@@ -39,9 +53,16 @@ final class AgentConfigurationStore {
     private let readKey: () throws -> String
     private let writeKey: (String) throws -> Void
     init(root: URL = AppPaths.data.appendingPathComponent("Agent", isDirectory: true),
-         readKey: @escaping () throws -> String = AgentKeychain.read,
-         writeKey: @escaping (String) throws -> Void = AgentKeychain.write) {
-        self.root = root; self.readKey = readKey; self.writeKey = writeKey
+         readKey: (() throws -> String)? = nil,
+         writeKey: ((String) throws -> Void)? = nil) {
+        self.root = root
+        let keyFile = root.appendingPathComponent("api-key")
+        self.readKey = readKey ?? {
+            guard FileManager.default.fileExists(atPath: keyFile.path) else { return "" }
+            do { return try String(contentsOf: keyFile, encoding: .utf8) }
+            catch { throw AgentError.message("无法读取本机 Agent 密钥，请在设置中重新填写并保存。") }
+        }
+        self.writeKey = writeKey ?? { try Self.writePrivate(Data($0.utf8), to: keyFile) }
     }
     var configuration: AgentConfiguration {
         guard let data = try? Data(contentsOf: root.appendingPathComponent("settings.json")),
@@ -67,7 +88,7 @@ final class AgentConfigurationStore {
         let config = try savedConfiguration(), key = try readKey()
         guard !key.isEmpty else { return "" }
         guard config.credentialDigest == Self.digest(key) else {
-            throw AgentError.message("模型配置与钥匙串密钥不匹配，请重新填写并保存，避免发送到错误的服务。")
+            throw AgentError.message("模型配置与本机保存的密钥不匹配，请重新填写并保存。")
         }
         return key
     }
@@ -91,29 +112,5 @@ final class AgentConfigurationStore {
             throw AgentError.message("当前文字服务使用 Chat Completions。请向服务商确认 Anthropic 兼容地址后单独填写，不能自动转换。")
         }
         return (AgentConfiguration(), gateway.key)
-    }
-}
-
-enum AgentKeychain {
-    private static var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "local.hello.agent", kSecAttrAccount as String: "llm-api-key"] }
-    static func read() throws -> String {
-        var request = query
-        request[kSecReturnData as String] = true; request[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(request as CFDictionary, &item)
-        if status == errSecItemNotFound { return "" }
-        guard status == errSecSuccess, let data = item as? Data else {
-            throw AgentError.message("无法读取 Agent 密钥，请检查 macOS 钥匙串权限（\(status)）。")
-        }
-        return String(decoding: data, as: UTF8.self)
-    }
-    static func write(_ key: String) throws {
-        let attributes = [kSecValueData as String: Data(key.utf8)]
-        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
-        }
-        guard status == errSecSuccess else { throw AgentError.message("无法保存 Agent 密钥（\(status)）。") }
     }
 }

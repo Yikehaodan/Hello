@@ -12,27 +12,36 @@ struct GatewayRetryTests {
         let transport = URLSession(configuration: config)
         defer { transport.invalidateAndCancel() }
         var progress: [Int] = []
-        let gateway = try Gateway(transport: transport, retryWait: { _ in }, onRetry: { attempt, limit in
+        var events: [(UUID, Bool)] = []
+        var gateway = try Gateway(transport: transport, retryWait: { _ in }, onRetry: { attempt, limit in
             precondition(limit == 5); progress.append(attempt)
         })
+        gateway.onRequestState = { events.append(($0, $1)) }
         for code in [200, 401, -1001] {
+            events = []
             FaultTransport.reset([code, 200])
             await gateway.warmupTransport()
+            precondition(events.isEmpty, "Connection warmup is not LLM processing time")
             precondition(FaultTransport.requests.count == 1 && FaultTransport.requests[0].isEmpty)
             _ = try await gateway.polish("测试原文")
             precondition(FaultTransport.requests.count == 2 && progress.isEmpty)
         }
         print("PASS: warmup uses the generation transport, sends no transcript, never retries and failures do not block generation")
+        events = []
         FaultTransport.reset([-1009, -1001, 502, 503, 429, 200])
         _ = try await gateway.polish("测试原文")
         precondition(progress == [1, 2, 3, 4, 5] && FaultTransport.requests.count == 6)
         precondition(Set(FaultTransport.requests).count == 1, "Retry must preserve the exact request body")
+        precondition(events.count == 2 && events[0].1 && !events[1].1 && events[0].0 == events[1].0,
+                     "One timing interval covers all six requests and their retry waits")
         print("PASS: offline/timeout/502/503/429 recover on fifth retry; identical payload, exact progress")
 
-        progress = []; FaultTransport.reset(Array(repeating: 503, count: 8))
+        events = []; progress = []; FaultTransport.reset(Array(repeating: 503, count: 8))
         do { _ = try await gateway.translate("原文", to: "English"); fatalError("must fail") }
         catch { precondition(error.localizedDescription.contains("已重试 5 次")) }
         precondition(progress == [1, 2, 3, 4, 5] && FaultTransport.requests.count == 6)
+        precondition(events.count == 2 && events[0].0 == events[1].0 && !events[1].1,
+                     "Failed requests close their timing interval before returning")
         print("PASS: translation stops after initial request plus five retries")
 
         for code in [400, 401, 403, 404, -999, -1202] {
@@ -70,10 +79,24 @@ struct GatewayRetryTests {
         precondition((dictatedBody["thinking"] as? [String: String])?["type"] == "disabled" && dictatedBody["reasoning_effort"] == nil,
                      "Context dictation must disable thinking for fast transcription")
         let dictatedMessages = dictatedBody["messages"] as! [[String: Any]]
-        precondition(dictatedBody["response_format"] == nil && (dictatedMessages.first?["content"] as? String ?? "").contains("本次是上下文听写"))
+        precondition(dictatedMessages.map { $0["role"] as! String } == ["system", "user", "assistant", "user", "assistant", "user", "assistant", "user"],
+                     "Context dictation sends three example pairs before the current input")
+        precondition(dictatedBody["response_format"] == nil && !(dictatedMessages.first?["content"] as? String ?? "").isEmpty)
         let dictatedParts = dictatedMessages.last!["content"] as! [[String: Any]]
         precondition((dictatedParts[1]["image_url"] as? [String: String])?["url"] == snapshot.imageDataURL)
+        precondition(dictatedParts.count == 2)
+        let focusedPart = dictatedParts.first?["text"] as? String ?? ""
+        precondition(focusedPart.contains("focused_input_text") && focusedPart.contains("明天下午开会"))
+        let requestText = String(decoding: FaultTransport.requests[0], as: UTF8.self)
+        precondition(!requestText.contains("screenshot_text") && !requestText.contains("reference_terms"))
         print("PASS: context dictation disables thinking, retains spoken questions/images and retries the identical payload")
+        FaultTransport.reset([200]); FaultTransport.plainTextFixture = "这个 Claude Code 怎么配置？"
+        _ = try await gateway.polish("这个 cloud code 怎么配置？", context: VoiceContext(inputText: "Claude Code", imageDataURL: snapshot.imageDataURL))
+        let termBody = try JSONSerialization.jsonObject(with: FaultTransport.requests[0]) as! [String: Any]
+        let termMessages = termBody["messages"] as! [[String: Any]]
+        let termParts = termMessages.last!["content"] as! [[String: Any]]
+        precondition(termParts.count == 2 && (termParts.first?["text"] as? String ?? "").contains("focused_input_text"),
+                     "Original focused input is retained with the screenshot without OCR or extracted candidates")
         FaultTransport.reset([200])
         _ = try await gateway.ask("这个页面是什么", selectedText: "", context: VoiceContext())
         let emptyBody = try JSONSerialization.jsonObject(with: FaultTransport.requests[0]) as! [String: Any]
@@ -100,6 +123,22 @@ struct GatewayRetryTests {
         print("PASS: cancellation interrupts retry delay without sending another request; no real network")
 
         let unsaved = try Gateway(base: Gateway.defaultBase, key: "connection-fixture", model: Gateway.defaultModel, transport: transport)
+        let oldDraft = "星河旧方案包含数据筛选和实验评估，每周更新进度报告。"
+        let shortSpeech = "请继续修改调研文档。"
+        FaultTransport.reset([200, 200])
+        FaultTransport.textSequence = [shortSpeech + oldDraft, shortSpeech]
+        let recovered = try await gateway.polish(shortSpeech, dictionary: "词典标记", context: VoiceContext(inputText: oldDraft, imageDataURL: snapshot.imageDataURL), memory: "记忆标记")
+        precondition(recovered == shortSpeech && FaultTransport.requests.count == 2)
+        let retryJSON = String(decoding: FaultTransport.requests[1], as: UTF8.self)
+        precondition(!retryJSON.contains(oldDraft) && !retryJSON.contains("image_url") && !retryJSON.contains("词典标记") && !retryJSON.contains("记忆标记"))
+        FaultTransport.reset([200, 200])
+        FaultTransport.textSequence = [shortSpeech + oldDraft, shortSpeech + oldDraft]
+        let fallback = try await gateway.polish(shortSpeech, context: VoiceContext(inputText: oldDraft))
+        precondition(fallback == shortSpeech && FaultTransport.requests.count == 2)
+        precondition(Gateway.hasDictationContamination("重跑一下，之前判断是 web 大就不用跑了。", transcript: "我就不用跑了。", reference: "重跑一下，之前判断是 web 大就不用跑了。"))
+        precondition(!Gateway.hasDictationContamination(oldDraft, transcript: oldDraft, reference: oldDraft), "Actually spoken repetitions must survive")
+        precondition(!Gateway.hasDictationContamination("这个 Claude Code 怎么配置？", transcript: "这个 cloud code 怎么配置？", reference: "Claude Code 配置说明"))
+        print("PASS: copied drafts retry without reference or memory, repeated contamination falls back to speech, legitimate repetition and term correction survive")
         FaultTransport.reset([200])
         try await unsaved.testConnection()
         let probe = try JSONSerialization.jsonObject(with: FaultTransport.requests[0]) as! [String: Any]

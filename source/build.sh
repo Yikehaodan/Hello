@@ -43,31 +43,13 @@ cat > 'Hello.app/Contents/Info.plist' <<'PLIST'
 <key>CFBundleDisplayName</key><string>Hello</string>
 <key>CFBundleIconFile</key><string>Hello</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.9.3</string>
-<key>CFBundleVersion</key><string>29</string>
+<key>CFBundleShortVersionString</key><string>0.10.0</string>
+<key>CFBundleVersion</key><string>31</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSMicrophoneUsageDescription</key><string>Hello 仅在你主动开始录音后使用麦克风，将口述转成文字或用于语音提问。</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-# HTTP search exceptions are opt-in. Never bake the developer's private hosts into a public build.
-export HELLO_SEARCH_CONFIG="${HELLO_SEARCH_CONFIG:-${KNOCK_SEARCH_CONFIG:-}}"
-if [[ -n "$HELLO_SEARCH_CONFIG" ]]; then
-python3 - <<'ATS'
-import json, os, plistlib
-from pathlib import Path
-from urllib.parse import urlparse
-values = json.loads(Path(os.environ['HELLO_SEARCH_CONFIG']).read_text())
-hosts = {urlparse(values.get(field, '')).hostname for field in ('bnsHost', 'baseURL')
-         if urlparse(values.get(field, '')).scheme == 'http'} - {None}
-path = Path('Hello.app/Contents/Info.plist')
-info = plistlib.loads(path.read_bytes())
-if hosts:
-    info['NSAppTransportSecurity'] = {'NSExceptionDomains': {
-        host: {'NSExceptionAllowsInsecureHTTPLoads': True} for host in hosts}}
-    path.write_bytes(plistlib.dumps(info))
-ATS
-fi
 sign_dir="${HELLO_SIGN_HOME:-${KNOCK_SIGN_HOME:-${LIGHTVOICE_SIGN_HOME:-}}}"
 signer="$sign_dir/rcodesign/apple-codesign-0.29.0-aarch64-apple-darwin/rcodesign"
 if [[ -x "$signer" && -f "$sign_dir/private.key" ]]; then

@@ -8,13 +8,15 @@ struct FnGesture {
     private var pendingMode = InputMode.dictate
     private var suppressSpace = false
     private var shiftDown = false
-    private var controlDown = false
     private var pressedAt: TimeInterval = 0
     private var handledOnPress = false
     private var timedOutLoneFn = false
-    private(set) var triggeredMode: InputMode?
+    private var recognizedMode: InputMode?
+    // Keep lone-Fn detection separate from its target so Shift/Space chords and
+    // the long-press deadline retain their original timing.
+    var triggeredMode: InputMode? { recognizedMode == .dictate ? InputMode.primaryShortcutMode : recognizedMode }
     private(set) var ignoredLongPress = false
-    // Fn Space fires on Space-down; only release-triggered gestures have a deadline.
+    // Explicit chords fire when formed; only lone Fn waits for a short release.
     var longPressDeadline: TimeInterval? { active && armed && pendingMode == .dictate ? pressedAt + 0.6 : nil }
     mutating func consumeLongPress(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         guard let deadline = longPressDeadline, now >= deadline else { return false }
@@ -24,23 +26,20 @@ struct FnGesture {
         return true
     }
     private mutating func finishIfReleased(now: TimeInterval) -> Bool {
-        guard active, !down, !suppressSpace, !(pendingMode == .translate && shiftDown), !(pendingMode == .context && controlDown) else { return false }
+        guard active, !down, !suppressSpace, !(pendingMode == .translate && shiftDown) else { return false }
         ignoredLongPress = armed && pendingMode == .dictate && now >= pressedAt + 0.6
         let trigger = armed && !ignoredLongPress
-        if trigger { triggeredMode = pendingMode }
+        if trigger { recognizedMode = pendingMode }
         active = false; armed = false; handledOnPress = false; timedOutLoneFn = false
         return trigger
     }
     mutating func consume(type: CGEventType, key: Int64, flags: CGEventFlags, now: TimeInterval = ProcessInfo.processInfo.systemUptime, isRecording: Bool = false) -> (trigger: Bool, suppress: Bool) {
-        triggeredMode = nil
+        recognizedMode = nil
         ignoredLongPress = false
         let function = flags.contains(.maskSecondaryFn)
         let others = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
         if type == .flagsChanged && (key == 56 || key == 60) {
             shiftDown = flags.contains(.maskShift)
-        }
-        if type == .flagsChanged && (key == 59 || key == 62) {
-            controlDown = flags.contains(.maskControl)
         }
         if type == .keyDown || type == .keyUp {
             if key == 49 && suppressSpace {
@@ -56,7 +55,7 @@ struct FnGesture {
                 guard !handledOnPress else { return (false, true) }
                 // An explicit chord remains usable after holding Fn alone. Start immediately,
                 // and consume its releases/repeats without toggling the new recording again.
-                pendingMode = .ask; triggeredMode = .ask
+                pendingMode = .ask; recognizedMode = .ask
                 armed = false; timedOutLoneFn = false; handledOnPress = true
                 return (true, true)
             }
@@ -71,25 +70,27 @@ struct FnGesture {
             // Repressing Fn while another chord key remains held is not a new gesture.
             guard !active else { armed = false; timedOutLoneFn = false; return (false, true) }
             active = true; pressedAt = now; handledOnPress = false; timedOutLoneFn = false
-            armed = others.isEmpty || (others == .maskShift && shiftDown) || (others == .maskControl && controlDown)
-            pendingMode = others == .maskShift ? .translate : others == .maskControl ? .context : .dictate
-            if isRecording && armed {
-                handledOnPress = true; armed = false; triggeredMode = pendingMode
+            armed = others.isEmpty || (others == .maskShift && shiftDown)
+            pendingMode = others == .maskShift ? .translate : .dictate
+            if armed && (isRecording || pendingMode != .dictate) {
+                handledOnPress = true; armed = false; recognizedMode = pendingMode
                 return (true, true)
             }
             return (false, armed)
         }
         guard active else { return (false, false) }
         let shiftChord = others == .maskShift && (key == 56 || key == 60) && shiftDown
-        let controlChord = others == .maskControl && (key == 59 || key == 62) && controlDown
-        if down && (shiftChord || controlChord) && pendingMode != .ask {
-            let chordMode: InputMode = shiftChord ? .translate : .context
+        if down && shiftChord && pendingMode != .ask {
+            let chordMode = InputMode.translate
             if pendingMode != .dictate && pendingMode != chordMode { armed = false }
             else if timedOutLoneFn && !handledOnPress { armed = true }
             pendingMode = chordMode
             timedOutLoneFn = false
-        } else if !others.isEmpty && !(others == .maskShift && pendingMode == .translate) &&
-                    !(others == .maskControl && pendingMode == .context) {
+            if armed && !handledOnPress {
+                recognizedMode = pendingMode; handledOnPress = true; armed = false
+                return (true, false)
+            }
+        } else if !others.isEmpty && !(others == .maskShift && pendingMode == .translate) {
             armed = false; timedOutLoneFn = false
         }
         if key == 63 && !function { down = false }

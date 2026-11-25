@@ -10,6 +10,101 @@ private struct DestinationSnapshot: @unchecked Sendable {
     let selectionRange: CFRange?
 }
 private let destinationCaptureQueue = DispatchQueue(label: "Hello.destination-capture", qos: .userInitiated)
+private let memoryCaptureQueue = DispatchQueue(label: "Hello.memory-capture", qos: .utility)
+private struct MemoryInputSource: @unchecked Sendable {
+    let app: AXUIElement
+    let field: AXUIElement
+    let pid: pid_t
+}
+
+/// Notifications are optional: unsupported controls retain the polling fallback.
+private final class MemoryAXObservation: @unchecked Sendable {
+    private var observer: AXObserver?
+    private var changed: (@MainActor () -> Void)?
+    init?(source: MemoryInputSource, changed: @escaping @MainActor () -> Void) {
+        self.changed = changed
+        var observer: AXObserver?
+        guard AXObserverCreate(source.pid, { _, _, _, context in
+            guard let context else { return }
+            let observation = Unmanaged<MemoryAXObservation>.fromOpaque(context).takeUnretainedValue()
+            MainActor.assumeIsolated { observation.changed?() }
+        }, &observer) == .success, let observer else { return nil }
+        self.observer = observer
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        var registered = false
+        for (element, notification) in [(source.field, kAXValueChangedNotification),
+                (source.field, kAXSelectedTextChangedNotification),
+                (source.field, kAXUIElementDestroyedNotification),
+                (source.app, kAXFocusedUIElementChangedNotification)] {
+            if AXObserverAddNotification(observer, element, notification as CFString, context) == .success { registered = true }
+        }
+        guard registered else { return nil }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes)
+    }
+    func stop() {
+        if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .commonModes) }
+        observer = nil; changed = nil
+    }
+    deinit { stop() }
+}
+private struct ContextCaptureSource: @unchecked Sendable {
+    let pid: pid_t
+    let name: String
+    let window: AXUIElement?
+}
+
+/// Only restore a known, still-running user application when Hello owns focus.
+/// No background snapshots: the restored app must actually become frontmost.
+@MainActor
+final class RecordingContextTarget {
+    static let shared = RecordingContextTarget()
+    private var lastExternal: NSRunningApplication?
+    private var observer: NSObjectProtocol?
+    func start() {
+        guard observer == nil else { return }
+        remember(NSWorkspace.shared.frontmostApplication)
+        observer = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated { self?.remember(app) }
+        }
+    }
+    private func remember(_ app: NSRunningApplication?) {
+        guard let app, !Self.isHello(app.processIdentifier), app.activationPolicy == .regular, !app.isTerminated else { return }
+        lastExternal = app
+    }
+    private static func isHello(_ pid: pid_t) -> Bool {
+        if pid == ProcessInfo.processInfo.processIdentifier { return true }
+        guard let own = Bundle.main.bundleIdentifier else { return false }
+        return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == own
+    }
+    func prepare() async -> pid_t? {
+        start()
+        guard let current = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        guard Self.isHello(current) else { return current }
+        let target = lastExternal
+        let restored = await Self.restore(lastPID: target?.processIdentifier,
+            frontmost: { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+            isHello: Self.isHello,
+            available: { target?.isTerminated == false },
+            activate: { target?.activate(options: [.activateIgnoringOtherApps]) ?? false })
+        return restored ? target?.processIdentifier : nil
+    }
+    // Injected focus operations keep race/cancellation tests away from real applications.
+    static func restore(lastPID: pid_t?, frontmost: () -> pid_t?, isHello: (pid_t) -> Bool,
+                        available: () -> Bool, activate: () -> Bool,
+                        pause: () async throws -> Void = { try await Task.sleep(for: .milliseconds(10)) }) async -> Bool {
+        guard !Task.isCancelled, let current = frontmost(), isHello(current), let lastPID,
+              !isHello(lastPID), available(), activate() else { return false }
+        for _ in 0..<30 {
+            guard !Task.isCancelled, available(), let foreground = frontmost() else { return false }
+            if foreground == lastPID { return true }
+            // A third app winning focus is a user focus change, not permission to retarget.
+            guard isHello(foreground) else { return false }
+            do { try await pause() } catch { return false }
+        }
+        return false
+    }
+}
 
 /// 保存触发录音的应用和窗口。输入时使用该窗口当前的光标，不激活或抢走焦点。
 @MainActor
@@ -21,13 +116,28 @@ struct TextDestination {
     private let selectionElement: AXUIElement?
     private let selectionRange: CFRange?
 
-    /// Read only the focused editable field and capture one window, before any permission dialog.
-    /// Encoding runs off the UI thread; retries reuse this snapshot instead of recapturing.
+    /// AX, window capture and encoding run away from the UI actor. Pin the target
+    /// and discard the snapshot if focus changes; retries reuse the saved context.
     func captureContext(includeScreenshot: Bool) async -> VoiceContext {
+        let source = ContextCaptureSource(pid: pid, name: name, window: window)
+        let job = Task.detached(priority: .userInitiated) {
+            await Self.captureContext(source, includeScreenshot: includeScreenshot)
+        }
+        return await withTaskCancellationHandler(operation: { await job.value }, onCancel: { job.cancel() })
+    }
+
+    nonisolated private static func captureContext(_ source: ContextCaptureSource, includeScreenshot: Bool) async -> VoiceContext {
+        let pid = source.pid, name = source.name, window = source.window
         var result = VoiceContext(application: name)
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return result }
+        guard !Task.isCancelled, await isFrontmost(pid) else { return result }
         let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.25)
+        AXUIElementSetMessagingTimeout(app, 0.15)
+        func sameWindow() -> Bool {
+            guard let window else { return true }
+            guard let current = Self.axElement(app, kAXFocusedWindowAttribute) else { return false }
+            return CFEqual(window, current)
+        }
+        guard sameWindow() else { result.captureStatus = "已切换窗口 · 未读取上下文"; return result }
         // Chromium/Electron create their editable AX nodes lazily. Request that tree
         // before asking for focus; this changes no macOS permission or page content.
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
@@ -38,7 +148,7 @@ struct TextDestination {
         if focused == nil {
             for delay in [40, 80, 120, 160, 200] {
                 do { try await Task.sleep(for: .milliseconds(delay)) } catch { return result }
-                guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+                guard !Task.isCancelled, await isFrontmost(pid), sameWindow() else {
                     result.captureStatus = "已切换应用 · 未读取原输入框或截图"
                     return result
                 }
@@ -47,6 +157,9 @@ struct TextDestination {
             }
         }
 
+        guard !Task.isCancelled, await isFrontmost(pid), sameWindow() else {
+            return VoiceContext(application: name, captureStatus: "已切换窗口或取消 · 未读取上下文")
+        }
         if let focused, Self.isSecure(focused) {
             result.captureStatus = "密码输入框 · 未读取文字或截图"
             return result
@@ -54,6 +167,9 @@ struct TextDestination {
         let input = focused.flatMap { Self.inputValue($0) }
         result.inputText = input ?? ""
         result.windowTitle = window.map { String(Self.string($0, kAXTitleAttribute).prefix(300)) } ?? ""
+        guard !Task.isCancelled, await isFrontmost(pid), sameWindow() else {
+            return VoiceContext(application: name, captureStatus: "已切换窗口或取消 · 未保留上下文")
+        }
         let textStatus = input.map { $0.isEmpty ? "已读取输入框 · 内容为空" : "已读取输入框（\($0.count) 字）" }
             ?? (focused == nil ? "未获取到聚焦输入框" : "当前控件未提供可读取的输入文字")
         guard includeScreenshot else { result.captureStatus = textStatus + " · 截图已关闭"; return result }
@@ -74,12 +190,12 @@ struct TextDestination {
                    abs(rect.width - bounds.width) < 3 && abs(rect.height - bounds.height) < 3
         }
         guard let candidate, let number = candidate[kCGWindowNumber as String] as? UInt32,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+              !Task.isCancelled, await isFrontmost(pid), sameWindow(),
               let snapshot = CGWindowListCreateImage(.null, .optionIncludingWindow, number, [.boundsIgnoreFraming, .bestResolution]) else {
             result.captureStatus = textStatus + " · 未获得当前窗口截图"
             return result
         }
-        result.imageDataURL = await Task.detached(priority: .userInitiated) {
+        result.imageDataURL = {
             let scale = min(1.0, 1600.0 / Double(max(snapshot.width, snapshot.height)))
             let width = max(1, Int(Double(snapshot.width) * scale)), height = max(1, Int(Double(snapshot.height) * scale))
             guard let buffer = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
@@ -90,23 +206,30 @@ struct TextDestination {
             guard let image = buffer.makeImage(), let data = NSBitmapImageRep(cgImage: image)
                 .representation(using: .jpeg, properties: [.compressionFactor: 0.75]) else { return nil }
             return "data:image/jpeg;base64," + data.base64EncodedString()
-        }.value
+        }()
+        guard !Task.isCancelled, await isFrontmost(pid), sameWindow() else {
+            return VoiceContext(application: name, captureStatus: "已切换窗口或取消 · 未保留上下文")
+        }
         result.captureStatus = textStatus + (result.imageDataURL == nil ? " · 截图编码失败" : " · 已获取窗口截图")
         return result
     }
 
-    private static func string(_ element: AXUIElement, _ attribute: String) -> String {
+    nonisolated private static func isFrontmost(_ pid: pid_t) async -> Bool {
+        await MainActor.run { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }
+    }
+
+    nonisolated private static func string(_ element: AXUIElement, _ attribute: String) -> String {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return "" }
         return value as? String ?? ""
     }
 
-    private static func focusedInput(app: AXUIElement, pid: pid_t) -> AXUIElement? {
+    nonisolated private static func focusedInput(app: AXUIElement, pid: pid_t) -> AXUIElement? {
         var focused = axElement(app, kAXFocusedUIElementAttribute)
         if focused == nil, let window = axElement(app, kAXFocusedWindowAttribute) {
             focused = axElement(window, kAXFocusedUIElementAttribute)
         }
-        if focused == nil, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+        if focused == nil,
            let systemFocus = axElement(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute) {
             var owner: pid_t = 0
             if AXUIElementGetPid(systemFocus, &owner) == .success, owner == pid { focused = systemFocus }
@@ -121,13 +244,13 @@ struct TextDestination {
         return focused
     }
 
-    private static func isEditable(_ element: AXUIElement) -> Bool {
+    nonisolated private static func isEditable(_ element: AXUIElement) -> Bool {
         if [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(string(element, kAXRoleAttribute)) { return true }
         var editable: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &editable) == .success && editable as? Bool == true
     }
 
-    private static func inputValue(_ element: AXUIElement) -> String? {
+    nonisolated private static func inputValue(_ element: AXUIElement) -> String? {
         guard isEditable(element), !isSecure(element) else { return nil }
         var value: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success {
@@ -147,7 +270,7 @@ struct TextDestination {
         return nil
     }
 
-    private static func isSecure(_ element: AXUIElement) -> Bool {
+    nonisolated private static func isSecure(_ element: AXUIElement) -> Bool {
         var node: AXUIElement? = element
         for _ in 0..<4 {
             guard let current = node else { break }
@@ -160,7 +283,7 @@ struct TextDestination {
         return false
     }
 
-    private static func bounds(_ element: AXUIElement) -> CGRect? {
+    nonisolated private static func bounds(_ element: AXUIElement) -> CGRect? {
         var position: CFTypeRef?, size: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
               AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
@@ -183,7 +306,9 @@ struct TextDestination {
     }
 
     static func captureForRecording(includeSelection: Bool = false) async -> TextDestination? {
+        let preparedPID = includeSelection ? await RecordingContextTarget.shared.prepare() : NSWorkspace.shared.frontmostApplication?.processIdentifier
         guard !Task.isCancelled, let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier == preparedPID,
               app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               app.bundleIdentifier == nil || Bundle.main.bundleIdentifier == nil ||
                 app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
@@ -206,9 +331,7 @@ struct TextDestination {
         let focused = includeSelection ? axElement(element, kAXFocusedUIElementAttribute) : nil
         var selection = ""
         if let focused {
-            var subrole: CFTypeRef?
-            AXUIElementCopyAttributeValue(focused, kAXSubroleAttribute as CFString, &subrole)
-            if subrole as? String != kAXSecureTextFieldSubrole {
+            if !isSecure(focused) {
                 var value: CFTypeRef?
                 if AXUIElementCopyAttributeValue(focused, kAXSelectedTextAttribute as CFString, &value) == .success {
                     selection = String((value as? String ?? "").prefix(12000))
@@ -269,27 +392,60 @@ struct TextDestination {
     }
 
     /// Called immediately before paste; inability to identify the exact field disables learning.
-    func memoryCapture(for inserted: String, complete: @escaping (String, String) -> Void) -> MemoryCapture? {
+    func memoryCapture(for inserted: String, status: @escaping (MemoryCapture.Status) -> Void = { _ in },
+                       complete: @escaping (String, String) -> Void) -> MemoryCapture? {
         guard AXIsProcessTrusted(), NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return nil }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.15)
-        guard let field = Self.focusedInput(app: app, pid: pid), Self.isEditable(field), !Self.isSecure(field),
-              let range = Self.selectedRange(field), let before = Self.memoryValue(field),
-              let anchor = MemoryInsertionAnchor(before: before, selection: NSRange(location: range.location, length: range.length), inserted: inserted) else { return nil }
+        guard let field = Self.focusedInput(app: app, pid: pid), Self.isEditable(field), !Self.isSecure(field) else { return nil }
         AXUIElementSetMessagingTimeout(field, 0.15)
-        return MemoryCapture(anchor: anchor, read: {
-            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                  let current = Self.focusedInput(app: app, pid: pid), CFEqual(current, field),
-                  !Self.isSecure(current) else { return nil }
-            return Self.memoryValue(current)
-        }, complete: complete)
+        guard let before = Self.memoryValue(field),
+              let anchor = MemoryInsertionAnchor(before: before,
+                selection: Self.selectedRange(field).map { NSRange(location: $0.location, length: $0.length) },
+                inserted: inserted) else { return nil }
+        let source = MemoryInputSource(app: app, field: field, pid: pid)
+        let capture = MemoryCapture(anchor: anchor, read: {
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == source.pid else { return nil }
+            let value: String? = await withCheckedContinuation { continuation in
+                memoryCaptureQueue.async {
+                    guard let current = Self.focusedInput(app: source.app, pid: source.pid),
+                          CFEqual(current, source.field), !Self.isSecure(current) else {
+                        continuation.resume(returning: nil); return
+                    }
+                    continuation.resume(returning: Self.memoryValue(current))
+                }
+            }
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == source.pid else { return nil }
+            return value
+        }, status: status, complete: complete)
+        // Observer registration can time out in unsupported editors; never hold up the paste or UI.
+        Task { [weak capture] in
+            let observation: MemoryAXObservation? = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    continuation.resume(returning: MemoryAXObservation(source: source,
+                        changed: { [weak capture] in capture?.notifyChange() }))
+                }
+            }
+            guard let observation else { return }
+            guard let capture else { observation.stop(); return }
+            capture.attachObservation { observation.stop() }
+        }
+        return capture
     }
 
-    private static func memoryValue(_ field: AXUIElement) -> String? {
+    nonisolated private static func memoryValue(_ field: AXUIElement) -> String? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(field, kAXValueAttribute as CFString, &value) == .success,
-              let text = value as? String, text.count <= 24000 else { return nil }
-        return text
+        if AXUIElementCopyAttributeValue(field, kAXValueAttribute as CFString, &value) == .success,
+           let text = MemoryFieldText.string(value) { return text }
+        var count: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(field, kAXNumberOfCharactersAttribute as CFString, &count) == .success,
+              let count = count as? NSNumber, count.intValue >= 0, count.intValue <= 24000 else { return nil }
+        if count.intValue == 0 { return "" }
+        var range = CFRange(location: 0, length: count.intValue)
+        guard let parameter = AXValueCreate(.cfRange, &range),
+              AXUIElementCopyParameterizedAttributeValue(field, kAXStringForRangeParameterizedAttribute as CFString,
+                parameter, &value) == .success else { return nil }
+        return MemoryFieldText.string(value)
     }
 
     nonisolated private static func selectedRange(_ element: AXUIElement) -> CFRange? {

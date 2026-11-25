@@ -29,9 +29,9 @@ struct MemoryTests {
         precondition(store.speechWords == "晓雪")
         let reloaded = MemoryStore(root: root)
         precondition(reloaded.memories == store.memories && reloaded.enabled)
-        let permissions = try FileManager.default.attributesOfItem(atPath: store.file.path)[.posixPermissions] as! NSNumber
+        let permissions = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("records.sqlite").path)[.posixPermissions] as! NSNumber
         precondition(permissions.intValue == 0o600)
-        print("PASS: evidence/session deduplication, repeated correction, bounded retrieval and private Markdown round trip")
+        print("PASS: evidence/session deduplication, repeated correction, bounded retrieval and private database round trip")
 
         for pair in [("周三开会", "周四开会"), ("金额 300 元", "金额 500 元"), ("三百元", "五百元"), ("小雪", ""), ("小雪", "小雪") ] {
             precondition(MemoryEdit.excerpt(before: pair.0, after: pair.1) == nil)
@@ -45,6 +45,11 @@ struct MemoryTests {
         precondition(emoji.expected == "😀前小雪后" && emoji.fragment(in: "😀前晓雪后") == "晓雪")
         precondition(emoji.fragment(in: "另一个输入框") == nil)
         precondition(MemoryInsertionAnchor(before: "abc", selection: NSRange(location: 8, length: 2), inserted: "x") == nil)
+        precondition(MemoryInsertionAnchor(before: "", selection: nil, inserted: "小雪")?.expected == "小雪")
+        precondition(MemoryInsertionAnchor(before: "已有文字", selection: nil, inserted: "小雪") == nil)
+        precondition(MemoryFieldText.string(NSAttributedString(string: "富文本输入框")) == "富文本输入框")
+        precondition(MemoryFieldText.string("12345", limit: 4) == nil)
+        precondition(MemoryFieldText.string(42) == nil)
         print("PASS: numbers/dates/deletion/no-change ignored; hallucinated evidence rejected; UTF-16 and destination anchors")
 
         let id = store.memories[0].id
@@ -63,11 +68,16 @@ struct MemoryTests {
         }
         let expression = store.memories.first!
         precondition(expression.state == .suggested)
+        precondition(store.prompt(for: "好的", mode: "context").isEmpty)
         store.setState(expression.id, .active)
         precondition(store.prompt(for: "好的", mode: "dictate").contains("OK"))
+        precondition(store.prompt(for: "好的", mode: "context").contains("OK"))
+        precondition(store.prompt(for: "明天见", mode: "context").isEmpty)
         precondition(store.prompt(for: "好的", mode: "translate").isEmpty)
+        precondition(store.prompt(for: "好的", mode: "ask").isEmpty)
         store.setEnabled(false)
         precondition(store.prompt(for: "好的", mode: "dictate").isEmpty)
+        precondition(store.prompt(for: "好的", mode: "context").isEmpty)
         print("PASS: reversals suspend, deleted rules stay forgotten, expression requires approval and respects mode/off switch")
 
         let manual = MemoryStore(root: root.appendingPathComponent("manual"))
@@ -78,17 +88,19 @@ struct MemoryTests {
         precondition(manual.memories.first { $0.id == previousID }?.state == .paused)
         print("PASS: manual choices pause conflicting spellings")
 
-        let disk = try Data(contentsOf: store.file)
-        try (String(decoding: disk, as: UTF8.self) + "\n用户在外部编辑\n").write(to: store.file, atomically: true, encoding: .utf8)
+        let exported = try store.exportFile()
+        let originalMemories = store.memories
         store.setEnabled(true)
-        precondition(store.error != nil && !store.enabled)
+        store.importFile(exported)
+        precondition(store.memories == originalMemories && !store.enabled)
+        try "broken file".write(to: exported, atomically: true, encoding: .utf8)
+        store.importFile(exported)
+        precondition(store.error != nil && store.memories == originalMemories)
         store.reload(); store.setEnabled(true)
         precondition(store.enabled && store.error == nil)
-        try "broken file".write(to: store.file, atomically: true, encoding: .utf8)
-        store.reload(); store.setEnabled(true)
-        let preserved = try String(contentsOf: store.file, encoding: .utf8)
-        precondition(!store.enabled && preserved == "broken file")
-        print("PASS: external edits require reload; corrupt memory preserved and disabled")
+        let preserved = try String(contentsOf: exported, encoding: .utf8)
+        precondition(preserved == "broken file")
+        print("PASS: explicit export/import; malformed import cannot overwrite database; database reload is independent")
 
         let queue = MemoryStore(root: root.appendingPathComponent("queue")); queue.setEnabled(true)
         queue.record(before: "小雪", after: "晓雪", session: UUID())
@@ -123,6 +135,59 @@ struct MemoryTests {
         _ = try await gateway.polish("明天找小雪。", memory: "PERSONAL_MEMORY_FIXTURE")
         precondition(String(decoding: FaultTransport.requests[0], as: UTF8.self).contains("PERSONAL_MEMORY_FIXTURE"))
         print("PASS: configured LLM used, evidence attached, background failures do not retry, memory reaches existing processing request")
+
+        // A quick correction followed by send used to be lost before the first 500 ms poll.
+        var time: TimeInterval = 0
+        var rapidField: String? = "前小雪后"
+        var rapidCaptured: [(String, String)] = []
+        var stopped = 0
+        let rapidAnchor = MemoryInsertionAnchor(before: "前后", selection: NSRange(location: 1, length: 0), inserted: "小雪")!
+        let rapid = MemoryCapture(anchor: rapidAnchor, read: { rapidField }, now: { time },
+            complete: { rapidCaptured.append(($0, $1)) })
+        rapid.attachObservation { stopped += 1 }
+        await rapid.sample()
+        time = 0.05; rapidField = "前晓雪后"; await rapid.sample()
+        time = 0.3; await rapid.sample()
+        time = 0.31; rapidField = ""; await rapid.sample()
+        precondition(rapidCaptured.count == 1 && rapidCaptured[0].1 == "晓雪" && stopped == 1)
+        rapid.finish(); rapid.cancel(); precondition(stopped == 1)
+        rapid.attachObservation { stopped += 1 }
+        precondition(stopped == 2, "Late observer registration must be stopped immediately")
+
+        time = 0; rapidField = "前小雪后"
+        let settled = MemoryCapture(anchor: rapidAnchor, read: { rapidField }, now: { time },
+            complete: { rapidCaptured.append(($0, $1)) })
+        await settled.sample()
+        time = 0.1; rapidField = "前晓雪后"; await settled.sample()
+        time = 0.4; await settled.sample(); precondition(rapidCaptured.count == 1)
+        time = 1.4; await settled.sample()
+        precondition(rapidCaptured.count == 2, "Stable edits must submit without waiting 30 seconds")
+
+        time = 0; rapidField = "前小雪后"
+        let fleeting = MemoryCapture(anchor: rapidAnchor, read: { rapidField }, now: { time },
+            complete: { _, _ in preconditionFailure("An unstable single observation must not become memory") })
+        await fleeting.sample()
+        time = 0.05; rapidField = "前晓雪后"; await fleeting.sample()
+        time = 0.1; rapidField = nil; await fleeting.sample()
+
+        var reads = 0
+        let notification = MemoryCapture(anchor: rapidAnchor, read: { reads += 1; return "前小雪后" },
+            complete: { _, _ in preconditionFailure("Unchanged text must not become memory") })
+        for _ in 0..<30 { notification.notifyChange() }
+        try await Task.sleep(for: .milliseconds(100))
+        precondition(reads == 1, "Notification bursts must coalesce into one field read")
+        notification.cancel(); notification.notifyChange()
+        try await Task.sleep(for: .milliseconds(80)); precondition(reads == 1)
+
+        var readContinuation: CheckedContinuation<String?, Never>?
+        let cancelledRead = MemoryCapture(anchor: rapidAnchor,
+            read: { await withCheckedContinuation { readContinuation = $0 } },
+            complete: { _, _ in preconditionFailure("A cancelled asynchronous read must not learn") })
+        let readWork = Task { await cancelledRead.sample() }
+        while readContinuation == nil { await Task.yield() }
+        cancelledRead.cancel(); readContinuation?.resume(returning: "前小雪后")
+        await readWork.value
+        print("PASS: empty chat fields and rich text supported; rapid send preserved; settled edits submit promptly; notification bursts coalesced; late reads ignored")
 
         var field: String? = "前小雪后", captured: [(String, String)] = []
         let anchor = MemoryInsertionAnchor(before: "前后", selection: NSRange(location: 1, length: 0), inserted: "小雪")!

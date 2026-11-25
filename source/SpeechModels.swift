@@ -3,10 +3,12 @@ import Combine
 import Darwin
 
 enum SpeechModelID: String, CaseIterable, Identifiable, Codable, Sendable {
+    case qwenCloud = "qwen-cloud"
     case cloud, whisper, zipformer, sensevoice, qwen, qwenLite = "qwen-lite"
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .qwenCloud: return "千问 3 ASR · 百炼非流式"
         case .cloud: return "豆包 · 云端流式"
         case .whisper: return "Whisper · 本地通用"
         case .zipformer: return "Zipformer · 中文流式"
@@ -17,6 +19,7 @@ enum SpeechModelID: String, CaseIterable, Identifiable, Codable, Sendable {
     }
     var detail: String {
         switch self {
+        case .qwenCloud: return "停止录音后整段提交，通过 HTTP 一次返回完整文字；支持词典和个人记忆上下文，按 Token 计费。"
         case .cloud: return "录音时同步转写，需要网络，按语音服务价格计费。"
         case .whisper: return "约 574 MB · 首次使用时下载。支持多语言，录音保留在本机。"
         case .zipformer: return "约 167 MB · 仅中文。边录边识别，适合快速中文输入。"
@@ -25,7 +28,8 @@ enum SpeechModelID: String, CaseIterable, Identifiable, Codable, Sendable {
         case .qwenLite: return "约 542 MB · 多语言。结束后完整识别。首次下载约 1.88 GB，完成后自动压缩。"
         }
     }
-    var usesManagedRuntime: Bool { self != .cloud && self != .whisper }
+    var isCloud: Bool { self == .cloud || self == .qwenCloud }
+    var usesManagedRuntime: Bool { !isCloud && self != .whisper }
     func supports(language: String) -> Bool {
         if self == .zipformer { return language == "auto" || language == "zh" }
         if self == .sensevoice { return ["auto", "zh", "en", "ja", "ko", "yue"].contains(language) }
@@ -57,7 +61,8 @@ final class SpeechModelStore: ObservableObject {
     var onInstalled: ((SpeechModelID) -> Void)?
     let root: URL
     let resources: URL
-    let cloudAvailable: Bool
+    @Published private(set) var cloudAvailable: Bool
+    @Published private(set) var qwenCloudAvailable: Bool
     private let defaults: UserDefaults
     private var task: Task<Void, Never>?
     private var process: Process?
@@ -66,18 +71,25 @@ final class SpeechModelStore: ObservableObject {
     private let catalog: [String: Any]
     private let revision: Int
     static let selectionKey = "speechModel"
+    private static let qwenDefaultKey = "qwenCloudDefaultV1"
 
     init(resources: URL = Bundle.main.resourceURL!, root: URL? = nil,
-         defaults: UserDefaults = .standard, cloudAvailable: Bool = false) {
-        self.resources = resources; self.defaults = defaults; self.cloudAvailable = cloudAvailable
+         defaults: UserDefaults = .standard, cloudAvailable: Bool = false, qwenCloudAvailable: Bool = false) {
+        self.resources = resources; self.defaults = defaults
+        self.cloudAvailable = cloudAvailable; self.qwenCloudAvailable = qwenCloudAvailable
         self.root = root ?? AppPaths.speechModels
         let file = resources.appendingPathComponent("SpeechModels/models.json")
         let object = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file))) as? [String: Any] ?? [:]
         catalog = object["models"] as? [String: Any] ?? [:]; revision = object["revision"] as? Int ?? 1
-        if let value = defaults.string(forKey: Self.selectionKey), let choice = SpeechModelID(rawValue: value) {
+        if qwenCloudAvailable && !defaults.bool(forKey: Self.qwenDefaultKey) {
+            selected = .qwenCloud
+            defaults.set(SpeechModelID.qwenCloud.rawValue, forKey: Self.selectionKey)
+            defaults.set(true, forKey: Self.qwenDefaultKey)
+        } else if let value = defaults.string(forKey: Self.selectionKey), let choice = SpeechModelID(rawValue: value) {
             selected = choice
         } else {
-            selected = cloudAvailable && (defaults.object(forKey: "useCloudSpeech") as? Bool ?? true) ? .cloud : .whisper
+            selected = qwenCloudAvailable ? .qwenCloud :
+                (cloudAvailable && (defaults.object(forKey: "useCloudSpeech") as? Bool ?? true) ? .cloud : .whisper)
         }
         refresh()
     }
@@ -94,7 +106,9 @@ final class SpeechModelStore: ObservableObject {
         return installed.contains(.whisper) ? managed : nil
     }
     func isReady(_ model: SpeechModelID) -> Bool {
-        model == .cloud ? cloudAvailable : installed.contains(model) && (!model.usesManagedRuntime || runtimeReady)
+        if model == .cloud { return cloudAvailable }
+        if model == .qwenCloud { return qwenCloudAvailable }
+        return installed.contains(model) && (!model.usesManagedRuntime || runtimeReady)
     }
     func hasPendingDownload(_ model: SpeechModelID) -> Bool {
         let cache = root.appendingPathComponent("Downloads/" + model.rawValue)
@@ -103,8 +117,9 @@ final class SpeechModelStore: ObservableObject {
     func refresh() {
         var found = Set<SpeechModelID>()
         if cloudAvailable { found.insert(.cloud) }
+        if qwenCloudAvailable { found.insert(.qwenCloud) }
         if ["ggml-large-v3-turbo-q5_0.bin", "ggml-small-q5_1.bin"].contains(where: { FileManager.default.fileExists(atPath: resources.appendingPathComponent($0).path) }) { found.insert(.whisper) }
-        for choice in SpeechModelID.allCases where choice != .cloud {
+        for choice in SpeechModelID.allCases where !choice.isCloud {
             let folder = directory(choice)
             guard let data = try? Data(contentsOf: folder.appendingPathComponent("installed.json")),
                   let marker = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -124,8 +139,16 @@ final class SpeechModelStore: ObservableObject {
     func select(_ choice: SpeechModelID) {
         selected = choice; defaults.set(choice.rawValue, forKey: Self.selectionKey); preparationError = nil
     }
+    func setCloudAvailability(doubao: Bool, qwen: Bool) {
+        cloudAvailable = doubao; qwenCloudAvailable = qwen; refresh()
+    }
+    func makeQwenCloudDefault() {
+        guard qwenCloudAvailable else { return }
+        defaults.set(true, forKey: Self.qwenDefaultKey)
+        select(.qwenCloud)
+    }
     func downloadModel(_ choice: SpeechModelID, force: Bool = false) {
-        guard choice != .cloud, download == nil, force || !isReady(choice) else { return }
+        guard !choice.isCloud, download == nil, force || !isReady(choice) else { return }
         guard runtimeReady else { errors[choice] = "应用的识别组件不完整，请重新打开完整应用包。"; return }
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

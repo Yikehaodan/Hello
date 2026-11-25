@@ -1,11 +1,19 @@
 import Foundation
-import CryptoKit
 
-struct AnswerSource: Equatable, Codable, Identifiable {
+struct AnswerSource: Equatable, Codable, Identifiable, Sendable {
     var title: String
     var url: String
     var content: String
     var id: String { url }
+    var domain: String { URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "", options: .anchored) ?? "网页" }
+    var displayTitle: String {
+        let clean = title.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&amp;", with: "&").trimmingCharacters(in: .whitespacesAndNewlines)
+        if clean.isEmpty || ["relative", "link", "source", "untitled", "url"].contains(clean.lowercased()) || clean == url {
+            return domain
+        }
+        return clean
+    }
     static func validURL(_ value: String) -> Bool {
         guard let url = URL(string: value), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
               url.host != nil, url.user == nil, url.password == nil else { return false }
@@ -14,75 +22,9 @@ struct AnswerSource: Equatable, Codable, Identifiable {
 }
 
 struct AnswerLookup {
-    struct Configuration: Decodable {
-        let apiKey: String
-        let secretKey: String
-        let baseURL: String
-        let bns: String
-        let bnsHost: String
-    }
     let transport: URLSession
     let retryWait: @Sendable (Int) async throws -> Void
     let onRetry: (@MainActor (Int, Int) -> Void)?
-    var configurationURL: URL = AppPaths.data.appendingPathComponent("search.json")
-
-    func search(_ query: String) async throws -> [AnswerSource] {
-        guard let data = try? Data(contentsOf: configurationURL),
-              let config = try? JSONDecoder().decode(Configuration.self, from: data), !config.apiKey.isEmpty else {
-            throw VoiceError.message("联网搜索尚未配置。")
-        }
-        var base = config.baseURL
-        if base.isEmpty {
-            let name = config.bns.hasPrefix("bns://") ? String(config.bns.dropFirst(6)) : config.bns
-            guard let url = URL(string: config.bnsHost + "/get_instance/service/" + name) else {
-                throw VoiceError.message("搜索配置地址无效。")
-            }
-            let discovery = try await json(URLRequest(url: url))
-            let instances = discovery["instances"] as? [[String: Any]] ?? []
-            guard let instance = instances.first(where: { String(describing: $0["status"] ?? "") == "0" }) ?? instances.first,
-                  let host = (instance["ip"] ?? instance["host"]) as? String, !host.isEmpty,
-                  let port = instance["port"] else { throw VoiceError.message("搜索服务暂时不可用，请检查内网 / VPN。") }
-            base = "http://\(host):\(port)"
-        }
-        guard var parts = URLComponents(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/search/api") else {
-            throw VoiceError.message("搜索服务地址无效。")
-        }
-        let clientIP = "127.0.0.1"
-        parts.queryItems = [URLQueryItem(name: "word", value: query), URLQueryItem(name: "clientip", value: clientIP)]
-        guard let url = parts.url else { throw VoiceError.message("搜索词无效。") }
-        let digest = Insecure.MD5.hash(data: Data((config.apiKey + query + clientIP + config.secretKey).utf8))
-            .map { String(format: "%02x", $0) }.joined()
-        let characters = Array(digest)
-        let signature = String([7, 3, 17, 13, 1, 21].map { characters[$0] })
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(config.apiKey, forHTTPHeaderField: "Api-Key")
-        request.setValue(signature, forHTTPHeaderField: "Api-Auth")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["size": ["main": 5, "video": 0, "aladdin": 0], "from": ["main": 0]])
-        let payload = try await json(request)
-        var items: [[String: Any]] = []
-        for key in ["results", "data", "result"] {
-            guard let container = payload[key] as? [String: Any] else { continue }
-            if let found = container["result"] as? [[String: Any]] { items = found; break }
-            if let main = container["main"] as? [String: Any] {
-                for field in ["result", "items", "docs", "list"] {
-                    if let found = main[field] as? [[String: Any]] { items = found; break }
-                }
-            }
-            if !items.isEmpty { break }
-        }
-        var seen = Set<String>()
-        return items.compactMap { item in
-            guard let url = (item["url"] ?? item["link"]) as? String,
-                  AnswerSource.validURL(url), seen.insert(url).inserted else { return nil }
-            let sentences = (item["sentence"] as? [String])?.joined(separator: "\n") ?? item["sentence"] as? String ?? ""
-            let snippet = (item["abstract"] ?? item["snippet"] ?? item["content"]) as? String ?? ""
-            return AnswerSource(title: String((item["title"] as? String ?? url).prefix(200)), url: url,
-                                content: String((sentences.isEmpty ? snippet : sentences).prefix(4500)))
-        }
-    }
-
     func weather(city: String) async throws -> [AnswerSource] {
         var geo = URLComponents(string: "https://geocoding-api.open-meteo.com/v1/search")!
         geo.queryItems = [URLQueryItem(name: "name", value: city), URLQueryItem(name: "count", value: "1"),

@@ -17,7 +17,7 @@ struct LibraryStoreTests {
         check(reload.words == store.words && reload.history == store.history, "exact save and reload")
         check(reload.totalDuration == 12.5 && reload.totalWords == 5, "mixed-language statistics")
         check(reload.dictionaryPrompt == "DeepSeek、轻声输入", "recognizer vocabulary")
-        let attributes = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("library.json").path)
+        let attributes = try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("records.sqlite").path)
         check((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "private file permissions")
 
         store.addWord("deepseek")
@@ -49,6 +49,19 @@ struct LibraryStoreTests {
         store.deleteWord(id: identity)
         check(LibraryStore(root: root).history == store.history && LibraryStore(root: root).words == store.words, "deletions persist")
 
+        let cached = LibraryStore(root: sandbox.appendingPathComponent("cached-statistics"))
+        let cachedID = cached.addHistory(raw: "你好", text: "你好", duration: 10, application: "Fixture")!
+        check(cached.totalWords == 2 && cached.statistics.completed == 1 && cached.statistics.activeDays == 1, "initial cached statistics")
+        cached.addWord("词典变更")
+        check(cached.totalWords == 2 && cached.totalDuration == 10, "dictionary edits preserve statistics")
+        check(cached.updateHistory(id: cachedID, raw: "你好世界", text: "你好世界", succeeded: true), "update cached entry")
+        check(cached.totalWords == 4 && cached.canRetry(cached.history[0]), "retry refreshes statistics and indexed membership")
+        check(cached.updateHistory(id: cachedID, raw: "你好世界", text: "", succeeded: false), "mark cached entry unsuccessful")
+        check(cached.totalWords == 0 && cached.totalDuration == 0 && cached.statistics.completed == 0, "failure invalidates cached totals")
+        let removed = cached.history[0]
+        cached.deleteHistory(id: cachedID)
+        check(cached.statistics.activeDays == 0 && !cached.canRetry(removed), "deletion invalidates statistics and indexed membership")
+
         let contextStore = LibraryStore(root: sandbox.appendingPathComponent("context-metadata"))
         let contextID = contextStore.addHistory(raw: "口述", text: "口述", duration: 1, application: "Chrome", mode: "context",
             contextCaptureStatus: "已读取输入框（7 字） · 已获取窗口截图")!
@@ -60,6 +73,21 @@ struct LibraryStoreTests {
         let decodedLegacy = try JSONDecoder().decode(HistoryEntry.self, from: legacyData)
         check(decodedLegacy.contextCaptureStatus == nil, "legacy records without capture metadata remain readable")
         check(decodedLegacy.contextScreenshotFileName == nil && decodedLegacy.contextInputText == nil, "legacy screenshot/context fields are optional")
+        check(decodedLegacy.timings == nil, "legacy records do not invent processing times")
+        let timingRoot = sandbox.appendingPathComponent("timings")
+        let timedStore = LibraryStore(root: timingRoot)
+        let timings = HistoryTimings(total: 2.7, asr: 0.6, llm: 2.0)
+        let timedID = timedStore.addHistory(raw: "测试", text: "测试", duration: 8, application: "Test", timings: timings)!
+        check(LibraryStore(root: timingRoot).history.first?.timings == timings, "processing timings persist independently of recording duration")
+        let retryTimings = HistoryTimings(total: 1.2, llm: 1.1)
+        check(timedStore.updateHistory(id: timedID, raw: "测试", text: "重试", succeeded: true, timings: retryTimings) &&
+              LibraryStore(root: timingRoot).history.first?.timings == retryTimings, "retry replaces timings and clears unused ASR")
+        check(!timedStore.updateHistory(id: timedID, raw: "测试", text: "bad", succeeded: true,
+                                       timings: HistoryTimings(total: -1)), "negative timings are rejected")
+        check(timedStore.addHistory(raw: "bad", text: "bad", duration: 1, application: "Test",
+                                    timings: HistoryTimings(total: 1, llm: .infinity)) == nil,
+              "non-finite timings are rejected")
+        check(LibraryStore(root: timingRoot).history.first?.timings == retryTimings, "invalid timing writes leave disk intact")
 
         let screenshotRoot = sandbox.appendingPathComponent("screenshot-history")
         let screenshots = LibraryStore(root: screenshotRoot)
@@ -220,12 +248,13 @@ struct LibraryStoreTests {
         let expireStore = LibraryStore(root: expiredAudioRoot)
         let expireID = expireStore.addHistory(raw: "test", text: "test", duration: 1, application: "Fixture", audio: audioFixture)!
         let expireURL = expireStore.audioURL(for: expireID)!
-        let expireFile = expiredAudioRoot.appendingPathComponent("library.json")
-        var expireSnapshot = try JSONSerialization.jsonObject(with: Data(contentsOf: expireFile)) as! [String: Any]
-        var expireEntry = (expireSnapshot["history"] as! [[String: Any]])[0]
-        expireEntry["date"] = Date().addingTimeInterval(-3 * 86400).timeIntervalSinceReferenceDate
-        expireSnapshot["history"] = [expireEntry]; expireSnapshot["retention"] = "day"
-        try JSONSerialization.data(withJSONObject: expireSnapshot).write(to: expireFile)
+        var expiredEntry = expireStore.history[0]
+        expiredEntry.date = Date().addingTimeInterval(-3 * 86400)
+        let expireDB = expireStore.database!
+        try expireDB.transaction {
+            try expireDB.sync("voice", old: expireStore.history, new: [expiredEntry]) { entry, _ in DatabaseIndex(date: entry.date) }
+            try expireDB.setMetadata("retention", HistoryRetention.day)
+        }
         check(LibraryStore(root: expiredAudioRoot).history.isEmpty && !FileManager.default.fileExists(atPath: expireURL.path),
               "expired history removes its retained audio on reload")
         print("PASS: persistence, permissions, CSV, retention, statistics, rollback, legacy JSON, audio ownership, cancellation history, retry identity, deletion/expiry/never cleanup and symlink rejection")

@@ -2,10 +2,6 @@
 # Build a self-contained drag-to-Applications disk image on Apple Silicon macOS.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-if [[ -n "${HELLO_SEARCH_CONFIG:-${KNOCK_SEARCH_CONFIG:-}}" ]]; then
-    print -u2 '发布安装包不能使用私人搜索配置，请取消 HELLO_SEARCH_CONFIG 后重试。'
-    exit 1
-fi
 zsh scripts/doctor.sh
 zsh source/build.sh
 app="$PWD/Hello.app"
@@ -31,7 +27,7 @@ filename="Hello-${version}-macOS-arm64.dmg"
 package_temp=$(mktemp -d "${TMPDIR:-/tmp}/hello-package.XXXXXX")
 trap 'rm -rf "$package_temp"' EXIT
 mkdir "$package_temp/image"
-ditto --noqtn "$app" "$package_temp/image/Hello.app"
+ditto --noqtn --clone "$app" "$package_temp/image/Hello.app"
 ln -s /Applications "$package_temp/image/Applications"
 cp docs/INSTALL.md "$package_temp/image/安装说明 Installation.txt"
 cp THIRD_PARTY_NOTICES.md "$package_temp/image/Third Party Notices.txt"

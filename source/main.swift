@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import QuartzCore
 
 final class VoicePanel: NSPanel {
     override var canBecomeKey: Bool { false }
@@ -13,29 +14,37 @@ final class AnswerPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model: VoiceModel
-    let agent = AgentSession()
+    let agent: AgentSession
     let shortcut = FnShortcut()
     private let listenForShortcuts: Bool
     private var window: NSWindow!
     private var hud: NSPanel!
     private var recordingHUD: NSView!
+    private var agentHUD: NSView!
     private var answer: NSPanel!
-    private var agentPanel: NSPanel!
+    private var agentWindow: NSWindow!
     private var item: NSStatusItem!
     private var subscriptions = Set<AnyCancellable>()
-    private enum HUDContent { case hidden, recording, status }
+    private enum HUDContent { case hidden, recording, agent, status }
     private var hudContent = HUDContent.hidden
     private var pendingHUDStatus: String?
     private var hudRevision: UInt = 0
     private var isTerminating = false
-    init(model: VoiceModel? = nil, listenForShortcuts: Bool = true) {
+    init(model: VoiceModel? = nil, agent: AgentSession? = nil, listenForShortcuts: Bool = true) {
         self.model = model ?? VoiceModel()
+        self.agent = agent ?? AgentSession()
         self.listenForShortcuts = listenForShortcuts
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        RecordingContextTarget.shared.start()
+        // Refresh the running Dock tile as well as the bundled Finder icon.
+        if let icon = Bundle.main.url(forResource: "Hello", withExtension: "icns") {
+            NSApp.applicationIconImage = NSImage(contentsOf: icon)
+        }
+        _ = TokenUsageStore.shared
         NSApp.setActivationPolicy(model.preferences.showDockIcon ? .regular : .accessory)
         model.preferences.onDockVisibilityChange = { visible in
             NSApp.setActivationPolicy(visible ? .regular : .accessory)
@@ -55,52 +64,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = editMenu; mainMenu.addItem(editItem); NSApp.mainMenu = mainMenu
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1080, height: 750), styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        window.delegate = self
         window.title = "Hello"; window.isReleasedWhenClosed = false
         window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
         window.minSize = NSSize(width: 1000, height: 700)
-        window.contentView = NSHostingView(rootView: MainView(model: model, enableShortcut: { [weak self] in
+        window.contentView = NSHostingView(rootView: MainView(model: model, agent: agent, closeWindow: { [weak self] in self?.closeAgentWindow() }, enableShortcut: { [weak self] in
             guard let self else { return }
             self.model.preferences.requestAccessibility()
             if self.listenForShortcuts { self.shortcut.refresh() }
         }))
         window.center(); show()
+        agentWindow = NSWindow(contentRect: NSRect(origin: .zero, size: AgentResultView.defaultSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        agentWindow.title = "Hello · 任务结果"; agentWindow.isReleasedWhenClosed = false
+        agentWindow.delegate = self; agentWindow.contentMinSize = AgentResultView.minimumSize
+        agentWindow.animationBehavior = .none
+        agentWindow.contentView = NSHostingView(rootView: AgentResultView(agent: agent, close: { [weak self] in self?.closeAgentWindow() }))
+        model.$appearance.sink { [weak self] value in
+            self?.agentWindow.appearance = value == "light" ? NSAppearance(named: .aqua) : value == "dark" ? NSAppearance(named: .darkAqua) : nil
+        }.store(in: &subscriptions)
         hud = VoicePanel(contentRect: NSRect(x: 0, y: 0, width: 220, height: 70), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hud.level = .floating; hud.isOpaque = false; hud.backgroundColor = .clear; hud.hasShadow = true
         hud.hidesOnDeactivate = false
         hud.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; hud.ignoresMouseEvents = false
         recordingHUD = NSHostingView(rootView: RecordingHUD(model: model))
         hud.contentView = recordingHUD
+        agentHUD = NSHostingView(rootView: AgentProgressHUD(agent: agent))
         answer = AnswerPanel(contentRect: NSRect(x: 0, y: 0, width: 800, height: 488), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         answer.title = "Hello · 回答"; answer.isReleasedWhenClosed = false
         answer.isOpaque = false; answer.backgroundColor = .clear; answer.hasShadow = false
         answer.level = .floating; answer.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         answer.contentView = NSHostingView(rootView: AnswerView(model: model))
-        agentPanel = AnswerPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        agentPanel.title = "Hello Agent"; agentPanel.isReleasedWhenClosed = false
-        agentPanel.isOpaque = false; agentPanel.backgroundColor = .clear; agentPanel.hasShadow = true
-        agentPanel.level = .floating; agentPanel.hidesOnDeactivate = false
-        agentPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        agentPanel.contentView = NSHostingView(rootView: AgentBubbleView(agent: agent))
-        model.onAgentRequest = { [weak self] text, selection in self?.agent.receiveVoice(text, selection: selection) }
+        model.onAgentRequest = { [weak self] text, selection, context in self?.agent.receiveVoice(text, selection: selection, context: context) }
         agent.onVoice = { [weak self] in
             guard let self, !self.model.busy else { return }
-            self.agent.visible = false; self.model.toggle(mode: .ask)
+            self.closeAgentWindow(); self.model.toggle(mode: .ask)
         }
+        agent.objectWillChange.sink { [weak self] _ in self?.scheduleHUDRefresh() }.store(in: &subscriptions)
         agent.$visible.removeDuplicates().sink { [weak self] visible in
             guard let self else { return }
             if visible {
-                let screen = NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main
-                let frame = screen?.visibleFrame ?? .zero
-                self.agentPanel.setFrameOrigin(NSPoint(x: frame.midX - 320, y: frame.minY + 20))
-                self.agentPanel.orderFrontRegardless()
-            } else { self.agentPanel.orderOut(nil) }
+                self.presentAgentWindow()
+            } else { self.agentWindow.orderOut(nil) }
         }.store(in: &subscriptions)
-        NotificationCenter.default.publisher(for: .helloShowAgent).sink { [weak self] _ in self?.agent.visible = true }.store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: .helloShowHistory).sink { [weak self] _ in self?.show() }.store(in: &subscriptions)
         NotificationCenter.default.publisher(for: .helloShowAgentSettings).sink { [weak self] _ in
-            self?.agent.visible = true; self?.agent.showSettings = true
+            self?.showAgent(); self?.agent.showSettings = true
         }.store(in: &subscriptions)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Hello")
+        let statusIcon = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Hello")?
+            .withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
+        statusIcon?.size = NSSize(width: 18, height: 18)
+        statusIcon?.isTemplate = true
+        item.button?.image = statusIcon
+        item.button?.imageScaling = .scaleProportionallyDown
+        item.button?.imagePosition = .imageLeading
+        item.button?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         let menu = NSMenu()
         menu.addItem(withTitle: "打开Hello", action: #selector(show), keyEquivalent: "")
         let permissionItem = menu.addItem(withTitle: "权限设置…", action: #selector(showPermissions), keyEquivalent: "")
@@ -111,15 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     + (screenshots && !screen ? 1 : 0)
                 permissionItem.title = count == 0 ? "权限设置 · 已就绪" : "权限设置 · \(count) 项待设置"
             }.store(in: &subscriptions)
-        menu.addItem(withTitle: "开始 / 结束录音  Fn", action: #selector(toggle), keyEquivalent: "")
+        menu.addItem(withTitle: "上下文听写  Fn", action: #selector(toggle), keyEquivalent: "")
         menu.addItem(withTitle: "语音翻译  Fn ⇧", action: #selector(translate), keyEquivalent: "")
-        menu.addItem(withTitle: "上下文听写  Fn ⌃", action: #selector(contextDictate), keyEquivalent: "")
         menu.addItem(withTitle: "语音任务  Fn Space", action: #selector(ask), keyEquivalent: "")
-        menu.addItem(withTitle: "打开 Agent / 任务记录", action: #selector(showAgent), keyEquivalent: "")
+        menu.addItem(withTitle: "历史记录", action: #selector(showHistory), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出", action: #selector(quit), keyEquivalent: "q")
         for entry in menu.items { entry.target = self }; item.menu = menu
-        shortcut.onToggle = { [weak self] in self?.model.toggle(mode: .dictate) }
+        shortcut.onToggle = { [weak self] in self?.model.toggle(mode: InputMode.primaryShortcutMode) }
         shortcut.onMode = { [weak self] mode in
             if mode == .ask { self?.agent.visible = false }
             self?.model.toggle(mode: mode)
@@ -128,7 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcut.onCancel = { [weak self] in
             guard let self else { return false }
             if self.model.busy { self.model.cancel(); return true }
-            if self.agent.visible { self.agent.visible = false; return true }
+            if self.agent.showsProgress { self.agent.dismissPresentation(); return true }
+            if self.agent.visible { self.closeAgentWindow(); return true }
             if self.model.showAnswer { self.model.showAnswer = false; return true }
             return false
         }
@@ -194,6 +213,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if agent.showsProgress {
+            pendingHUDStatus = nil
+            if hudContent != .agent {
+                hud.contentView = agentHUD; hudContent = .agent
+                showHUD(size: AgentProgressHUD.size, atRight: true)
+            }
+            return
+        }
         // Completion, copy and cancellation remain visible in the main window only.
         // The floating message card is reserved for a failed request that can be retried.
         guard model.canRetryProcessing else {
@@ -209,15 +236,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hudContent = .status
         showHUD(size: NSSize(width: 360, height: 120))
     }
-    private func showHUD(size: NSSize) {
+    private func showHUD(size: NSSize, atRight: Bool = false) {
         let screen = (hud.isVisible ? hud.screen : nil)
             ?? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) })
             ?? NSScreen.main
         hud.setContentSize(size)
         if let frame = screen?.visibleFrame {
-            hud.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2, y: frame.minY + 8))
+            hud.setFrameOrigin(atRight
+                ? NSPoint(x: frame.maxX - size.width - 20, y: max(frame.minY + 12, frame.midY - size.height / 2))
+                : NSPoint(x: frame.midX - size.width / 2, y: frame.minY + 8))
         }
         hud.orderFrontRegardless()
+    }
+    private func presentAgentWindow() {
+        guard !agentWindow.isVisible else {
+            agentWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let screen = (hud.isVisible ? hud.screen : nil)
+            ?? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) })
+            ?? NSScreen.main
+        agentWindow.setContentSize(AgentResultView.defaultSize)
+        var target = agentWindow.frame
+        if let available = screen?.visibleFrame {
+            target.size.width = min(target.width, available.width - 48)
+            target.size.height = min(target.height, available.height - 48)
+            target.origin = NSPoint(x: available.maxX - target.width - 24,
+                y: available.midY - target.height / 2)
+        }
+        let animate = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        agentWindow.setFrame(animate ? target.offsetBy(dx: 18, dy: 0) : target, display: true)
+        agentWindow.alphaValue = animate ? 0 : 1
+        agentWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        if animate {
+            // No delayed orderFront: closing during the entrance must stay closed.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                agentWindow.animator().setFrame(target, display: true)
+                agentWindow.animator().alphaValue = 1
+            }
+        }
     }
     private func dismissHUDStatus() {
         guard !model.busy else { return }
@@ -236,11 +297,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         show()
         NotificationCenter.default.post(name: .helloShowPermissions, object: nil)
     }
-    @objc func toggle() { model.toggle(mode: .dictate) }
+    @objc func toggle() { model.toggle(mode: InputMode.primaryShortcutMode) }
     @objc func translate() { model.toggle(mode: .translate) }
     @objc func contextDictate() { model.toggle(mode: .context) }
     @objc func ask() { model.toggle(mode: .ask) }
-    @objc func showAgent() { agent.visible = true }
+    @objc func showAgent() { agent.presentDetails() }
+    @objc func showHistory() { show(); NotificationCenter.default.post(name: .helloShowHistory, object: nil) }
+    func closeAgentWindow() {
+        agent.showSettings = false
+        agent.dismissPresentation()
+        agentWindow.orderOut(nil)
+    }
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow === agentWindow { agent.showSettings = false; agent.dismissPresentation() }
+    }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !model.prepareForTermination() else { return .terminateNow }

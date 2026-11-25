@@ -8,18 +8,43 @@ struct VoiceProcessingResult {
     var replacesSelection = false
 }
 
+// Monotonic elapsed time for one processing attempt. Streaming work done while
+// speaking is excluded: these measurements describe the wait after stopping.
+private struct ProcessingClock {
+    let started: TimeInterval
+    var asrStarted: TimeInterval?
+    var llmStarted: TimeInterval?
+    var llmRequestID: UUID?
+    var value = HistoryTimings(total: 0)
+    var finished = false
+
+    mutating func endASR(at now: TimeInterval) {
+        if let asrStarted { value.asr = max(0, now - asrStarted); self.asrStarted = nil }
+    }
+    mutating func endLLM(at now: TimeInterval) {
+        if let llmStarted { value.llm = max(0, now - llmStarted); self.llmStarted = nil }
+    }
+    mutating func finish(at now: TimeInterval) {
+        guard !finished else { return }
+        endASR(at: now); endLLM(at: now)
+        value.total = max(0, now - started); finished = true
+    }
+}
+
 @MainActor
 final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVAudioPlayerDelegate {
     typealias TranscriptionOperation = @MainActor (URL, String, String) async throws -> String
     typealias ProcessingOperation = @MainActor (String, InputMode, String, String, String) async throws -> VoiceProcessingResult
     typealias RecordingFactory = @MainActor (URL, [String: Any]) async throws -> any VoiceRecording
     typealias DestinationCapture = @MainActor (Bool) async -> TextDestination?
+    typealias ContextCapture = @MainActor (TextDestination?, Bool) async -> VoiceContext
     typealias GatewayFactory = @MainActor (@escaping @MainActor (Int, Int) -> Void) throws -> Gateway
     enum Phase: String { case ready, authorizing, recording, transcribing, polishing }
     @Published var phase = Phase.ready {
         didSet {
             if phase == .ready {
                 gatewayWarmup?.cancel(); gatewayWarmup = nil; sessionGateway = nil
+                contextWork?.cancel(); contextWork = nil
             }
             if phase != .ready { memoryCapture?.finish(); memoryCapture = nil }
             memory.setBusy(phase != .ready)
@@ -46,12 +71,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     @Published var mode = InputMode.dictate
     @Published var showAnswer = false
     // Hand off after transcription; Agent execution must not block ordinary dictation.
-    var onAgentRequest: (@MainActor (String, String) -> Void)?
+    var onAgentRequest: (@MainActor (String, String, VoiceContext?) -> UUID?)?
     @Published private(set) var answerSources: [AnswerSource] = []
     @Published private(set) var answerLookupPerformed = false
     @Published private(set) var lookupStatus = ""
     @Published private(set) var contextStatus = ""
     private var sessionContext: VoiceContext?
+    private var contextWork: Task<Void, Never>?
     @Published var language = UserDefaults.standard.string(forKey: "language") ?? "auto" {
         didSet { UserDefaults.standard.set(language, forKey: "language") }
     }
@@ -65,6 +91,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         didSet { UserDefaults.standard.set(useCloudSpeech, forKey: "useCloudSpeech") }
     }
     var cloudSpeechAvailable: Bool { cloudConfiguration != nil }
+    var qwenCloudSpeechAvailable: Bool { qwenCloudConfiguration != nil }
     @Published var appearance = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
         didSet { UserDefaults.standard.set(appearance, forKey: "appearance") }
     }
@@ -80,6 +107,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     private var audioURL: URL?
     private var player: AVAudioPlayer?
     private var sessionHistoryID: UUID?
+    private var sessionAgentTaskID: UUID?
     private var historySavePending = false
     private var sessionSucceeded = false
     private var sessionCancelled = false
@@ -97,9 +125,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     private var sessionSpeechModel = SpeechModelID.whisper
     private let recordingFactory: RecordingFactory
     private let destinationCapture: DestinationCapture
+    private let contextCapture: ContextCapture
+    private let processingNow: @MainActor () -> TimeInterval
+    private var processingClock: ProcessingClock?
     private var liveTranscription: LiveTranscription?
     private var cloudTranscription: CloudTranscription?
-    private let cloudConfiguration: CloudSpeechConfiguration?
+    private var cloudConfiguration: CloudSpeechConfiguration?
+    private var qwenCloudConfiguration: CloudSpeechConfiguration?
     private var liveSnapshot: Task<Void, Never>?
     private var warmup: Task<Void, Never>?
     private var gatewayWarmup: Task<Void, Never>?
@@ -119,10 +151,16 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     init(library: LibraryStore? = nil, sessionRoot: URL? = nil, preferences: AppPreferences? = nil,
          requestMicrophoneAccess: @escaping @MainActor () async -> Bool = { await AVCaptureDevice.requestAccess(for: .audio) },
          transcriptionOperation: TranscriptionOperation? = nil, processingOperation: ProcessingOperation? = nil,
-         asrResources: URL? = nil, cloudConfiguration: CloudSpeechConfiguration? = nil, speechModels: SpeechModelStore? = nil,
+         asrResources: URL? = nil, cloudConfiguration: CloudSpeechConfiguration? = nil,
+         qwenCloudConfiguration: CloudSpeechConfiguration? = nil, speechModels: SpeechModelStore? = nil,
          recordingFactory: @escaping RecordingFactory = { url, settings in try await AVAudioRecorder.makeForRecording(url: url, settings: settings) },
          gatewayFactory: @escaping GatewayFactory = { try Gateway(onRetry: $0) },
-         destinationCapture: @escaping DestinationCapture = { await TextDestination.captureForRecording(includeSelection: $0) }) {
+         destinationCapture: @escaping DestinationCapture = { await TextDestination.captureForRecording(includeSelection: $0) },
+         processingNow: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         contextCapture: @escaping ContextCapture = { destination, screenshots in
+             await destination?.captureContext(includeScreenshot: screenshots)
+                 ?? VoiceContext(captureStatus: "未找到外部窗口 · 请在目标页面使用快捷键")
+         }) {
         let resolvedLibrary = library ?? LibraryStore()
         self.library = resolvedLibrary
         self.memory = MemoryStore(root: resolvedLibrary.dataDirectory)
@@ -133,13 +171,18 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         self.processingOperation = processingOperation
         let cloudAllowed = Bundle.main.bundleIdentifier == "local.lightvoice.lin" || ProcessInfo.processInfo.environment["LIGHTVOICE_CLOUD_PROBE"] == "1"
         self.cloudConfiguration = transcriptionOperation == nil ? (cloudConfiguration ?? (cloudAllowed ? CloudSpeechConfiguration.load() : nil)) : nil
+        self.qwenCloudConfiguration = transcriptionOperation == nil ?
+            (qwenCloudConfiguration ?? (cloudAllowed ? CloudSpeechConfiguration.loadQwen() : nil)) : nil
         let resources = asrResources ?? Bundle.main.resourceURL!
-        let models = speechModels ?? SpeechModelStore(resources: resources, cloudAvailable: self.cloudConfiguration != nil)
+        let models = speechModels ?? SpeechModelStore(resources: resources, cloudAvailable: self.cloudConfiguration != nil,
+                                                       qwenCloudAvailable: self.qwenCloudConfiguration != nil)
         self.speechModels = models
         self.asr = LocalASR(resources: resources, modelURL: models.whisperModel)
         self.residentASR = ResidentASR(resources: resources, modelURL: models.whisperModel)
         self.recordingFactory = recordingFactory
         self.destinationCapture = destinationCapture
+        self.contextCapture = contextCapture
+        self.processingNow = processingNow
         self.gatewayFactory = gatewayFactory
         super.init()
         memory.consolidator = { evidence, existing in try await Gateway().consolidateMemory(evidence, existing: existing) }
@@ -184,17 +227,32 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         managedASR = nil
         speechModels.preparing = nil
         speechModels.select(choice)
-        useCloudSpeech = choice == .cloud
+        useCloudSpeech = choice.isCloud
         if let problem = speechModelProblem(choice, language: language) { status = problem }
         else { status = "已选择\(choice.title)。" }
         prepareSpeechModel()
     }
     private func speechModelProblem(_ choice: SpeechModelID, language: String) -> String? {
         if !choice.supports(language: language) { return "所选模型不支持当前口述语言，请切换语言或语音模型。" }
-        if choice == .cloud && !cloudSpeechAvailable { return "云端语音尚未配置，请选择本地语音模型。" }
+        if choice.isCloud && configurationForCloudSpeech(choice) == nil { return "该云端语音尚未配置，请在服务配置中填写密钥。" }
         if choice == .whisper && !asr.ready && !residentASR.ready { return "Whisper 尚未下载，请在设置中下载语音模型。" }
         if choice.usesManagedRuntime && !speechModels.isReady(choice) { return "所选语音模型尚未下载，请在设置中下载后再录音。" }
         return nil
+    }
+    private func configurationForCloudSpeech(_ choice: SpeechModelID) -> CloudSpeechConfiguration? {
+        choice == .qwenCloud ? qwenCloudConfiguration : (choice == .cloud ? cloudConfiguration : nil)
+    }
+    func reloadSpeechConfiguration(selectQwen: Bool = false) {
+        guard !busy else { return }
+        let cloudAllowed = Bundle.main.bundleIdentifier == "local.lightvoice.lin" || ProcessInfo.processInfo.environment["LIGHTVOICE_CLOUD_PROBE"] == "1"
+        guard cloudAllowed else { return }
+        cloudConfiguration = CloudSpeechConfiguration.load()
+        qwenCloudConfiguration = CloudSpeechConfiguration.loadQwen()
+        speechModels.setCloudAvailability(doubao: cloudConfiguration != nil, qwen: qwenCloudConfiguration != nil)
+        if selectQwen, qwenCloudConfiguration != nil {
+            speechModels.makeQwenCloudDefault(); useCloudSpeech = true
+            status = "已将千问 3 非流式 ASR 设为默认语音模型。"
+        }
     }
     private func backend(for choice: SpeechModelID) -> ManagedSpeechASR {
         if let backend = managedASR, backend.model == choice { return backend }
@@ -224,6 +282,9 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         switch phase {
         case .ready:
             guard preserveSessionBeforeReplacement() else { return }
+            processingClock = nil
+            contextWork?.cancel(); contextWork = nil
+            sessionContext = nil; contextStatus = ""
             stopHistoryAudio()
             if let requestedMode { mode = requestedMode }
             canRetryProcessing = false; apiRetryAttempt = 0
@@ -241,17 +302,19 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         let requestedSpeechModel = speechModels.selected
         showAnswer = false
         status = "正在准备麦克风……"
-        let newDestination = await destinationCapture(requestedMode.isAssistant || requestedMode == .context)
+        let newDestination = await destinationCapture(requestedMode.capturesContext)
         guard session == token, !Task.isCancelled else { return }
-        let newContext: VoiceContext?
-        if requestedMode == .context {
-            status = "正在读取当前输入框与页面……"
-            newContext = await newDestination?.captureContext(includeScreenshot: preferences.contextScreenshots)
-                ?? VoiceContext(captureStatus: "未找到外部窗口 · 请在目标页面按 Fn＋Control")
-        } else { newContext = nil }
-        guard session == token, !Task.isCancelled else { return }
-        sessionContext = newContext
-        contextStatus = newContext?.captureStatus ?? ""
+        if requestedMode.capturesContext {
+            contextStatus = "正在读取输入框与页面……"
+            let screenshots = preferences.contextScreenshots
+            contextWork = Task { [weak self] in
+                guard let self else { return }
+                let snapshot = await self.contextCapture(newDestination, screenshots)
+                guard self.session == token, !Task.isCancelled, self.phase != .ready else { return }
+                self.sessionContext = snapshot; self.contextStatus = snapshot.captureStatus
+                if self.phase == .recording { self.status = "正在录音 · \(snapshot.captureStatus) · 再按 Fn 结束" }
+            }
+        }
         let permitted = await requestMicrophoneAccess()
         guard session == token, !Task.isCancelled else { return }
         // The permission monitor maintains settings. On the successful hot path,
@@ -279,7 +342,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                 capture.stop(); try? FileManager.default.removeItem(at: audio); return
             }
             discardSessionAudio()
-            sessionHistoryID = nil
+            sessionHistoryID = nil; sessionAgentTaskID = nil
             historySavePending = false; sessionSucceeded = false; sessionCancelled = false
             sessionMode = requestedMode; sessionLanguage = requestedLanguage; sessionTargetLanguage = requestedTargetLanguage
             sessionSpeechModel = requestedSpeechModel
@@ -293,7 +356,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             }
             phase = .recording
             if soundEnabled { NSSound(named: "Tink")?.play() }
-            status = requestedMode == .context ? "正在录音 · \(contextStatus) · 再按 Fn 结束" :
+            status = requestedMode.capturesContext ? "正在录音 · \(contextStatus) · 再按 Fn 结束" :
                 (destination.map { "正在录音 · 将输入到\($0.name) · 再按 Fn 结束" } ?? "正在录音 · 再按 Fn 结束")
             let samplingTimer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
                 // This timer is registered only on the main run loop. Avoid queueing a
@@ -325,9 +388,11 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     private func beginLiveTranscription(token: UUID) {
         endLiveTranscription()
         nextSnapshotTime = 0.10
-        if transcriptionOperation == nil, sessionSpeechModel == .cloud, useCloudSpeech, let cloudConfiguration {
-            cloudTranscription = CloudTranscription(configuration: cloudConfiguration,
-                mode: .select(inputMode: sessionMode, source: sessionLanguage, target: sessionTargetLanguage), language: sessionLanguage)
+        if transcriptionOperation == nil, sessionSpeechModel.isCloud, useCloudSpeech,
+           let configuration = configurationForCloudSpeech(sessionSpeechModel) {
+            cloudTranscription = CloudTranscription(configuration: configuration,
+                mode: .select(inputMode: sessionMode, source: sessionLanguage, target: sessionTargetLanguage),
+                language: sessionLanguage, dictionary: recognitionDictionary)
             return
         }
         if transcriptionOperation == nil, sessionSpeechModel.usesManagedRuntime {
@@ -348,7 +413,8 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     private func sampleLiveTranscription(elapsed: Double) {
         guard elapsed >= nextSnapshotTime, liveSnapshot == nil,
-              liveTranscription != nil || cloudTranscription != nil || managedStream != nil, let audio = audioURL else { return }
+              liveTranscription != nil || cloudTranscription?.acceptsLiveAudio == true || managedStream != nil,
+              let audio = audioURL else { return }
         nextSnapshotTime = elapsed + (cloudTranscription == nil ? 0.25 : 0.10)
         let token = session
         liveSnapshot = Task { [weak self] in
@@ -370,10 +436,21 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     private func gateway(for token: UUID) throws -> Gateway {
         if let sessionGateway { return sessionGateway }
-        let gateway = try gatewayFactory { [weak self] attempt, limit in
+        var gateway = try gatewayFactory { [weak self] attempt, limit in
             guard let self, self.session == token, !Task.isCancelled else { return }
             self.apiRetryAttempt = attempt
             self.status = "API 连接暂时失败，正在重试（\(attempt)/\(limit)）……"
+        }
+        gateway.onRequestState = { [weak self] requestID, started in
+            guard let self, self.session == token, self.processingClock?.finished == false else { return }
+            if started {
+                guard !Task.isCancelled else { return }
+                self.processingClock?.llmRequestID = requestID
+                self.processingClock?.llmStarted = self.processingNow()
+            } else if self.processingClock?.llmRequestID == requestID {
+                self.processingClock?.endLLM(at: self.processingNow())
+                self.processingClock?.llmRequestID = nil
+            }
         }
         sessionGateway = gateway
         return gateway
@@ -395,9 +472,10 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         if sessionSpeechModel.usesManagedRuntime {
             return try await backend(for: sessionSpeechModel).transcribe(audio, language: sessionLanguage, dictionary: recognitionDictionary)
         }
-        if sessionSpeechModel == .cloud, allowCloud, let configuration = cloudConfiguration {
+        if sessionSpeechModel.isCloud, allowCloud, let configuration = configurationForCloudSpeech(sessionSpeechModel) {
             let cloud = CloudTranscription(configuration: configuration,
-                mode: .select(inputMode: sessionMode, source: sessionLanguage, target: sessionTargetLanguage), language: sessionLanguage)
+                mode: .select(inputMode: sessionMode, source: sessionLanguage, target: sessionTargetLanguage),
+                language: sessionLanguage, dictionary: recognitionDictionary)
             defer { cloud.cancel() }
             do { return try await cloud.finish(audio: audio).text }
             catch is CancellationError { throw CancellationError() }
@@ -412,6 +490,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     func stop() {
         guard phase == .recording else { return }
+        processingClock = ProcessingClock(started: processingNow())
         if sessionMode == .translate { sessionTargetLanguage = targetLanguage }
         if let recorder {
             recorder.updateMeters()
@@ -438,7 +517,11 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
             if transcriptionOperation == nil, let problem = speechModelProblem(sessionSpeechModel, language: sessionLanguage) { status = problem; return }
         }
         let token = session
-        phase = .transcribing; status = cloudTranscription == nil ? "正在本地转文字……" : "正在完成转写……"
+        if phase == .ready || processingClock == nil { processingClock = ProcessingClock(started: processingNow()) }
+        processingClock?.asrStarted = processingNow()
+        phase = .transcribing
+        status = sessionSpeechModel == .qwenCloud ? "正在提交整段录音并识别……" :
+            (cloudTranscription == nil ? "正在本地转文字……" : "正在完成转写……")
         work = Task {
             do {
                 let text: String
@@ -476,6 +559,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                     }
                 } else { text = try await transcribeComplete(audio) }
                 guard session == token, !Task.isCancelled else { return }
+                processingClock?.endASR(at: processingNow())
                 endLiveTranscription()
                 raw = text
                 guard !text.isEmpty else {
@@ -484,6 +568,10 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                     if library.retention == .never { discardSessionAudio() }
                     return
                 }
+                // Recording and ASR can run while the one-shot context snapshot
+                // is pending. Only the eventual model request needs that snapshot.
+                await contextWork?.value
+                guard session == token, !Task.isCancelled else { return }
                 let completed: Bool
                 if sessionMode != .dictate || autoPolish { completed = await processText(text, token: token, deliver: sessionHistoryID == nil) }
                 else {
@@ -505,6 +593,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     func polish() {
         guard !busy, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        processingClock = ProcessingClock(started: processingNow())
         let token = session
         sessionMode = mode; sessionTargetLanguage = targetLanguage
         let text = raw
@@ -518,6 +607,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     func retryProcessing() {
         guard !busy, canRetryProcessing, !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        processingClock = ProcessingClock(started: processingNow())
         let token = session, text = raw
         // Preserve the failed request's mode and language; never automatically paste a manual retry.
         mode = sessionMode
@@ -533,8 +623,8 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         guard session == token, !Task.isCancelled else { return false }
         if sessionMode == .ask, let onAgentRequest {
             canRetryProcessing = false; apiRetryAttempt = 0
-            onAgentRequest(text, destination?.selectedText ?? "")
-            result = "任务已交给 Agent，可在气泡中查看进度和结果。"
+            sessionAgentTaskID = onAgentRequest(text, destination?.selectedText ?? "", sessionContext)
+            result = "任务已交给 Agent，进度显示在浮窗，完成后弹出结果并保存在历史记录。"
             phase = .ready; status = result
             return true
         }
@@ -544,12 +634,13 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         phase = .polishing
         status = (sessionMode == .dictate || sessionMode == .context) ? "正在整理文字……" : sessionMode == .translate ? "正在翻译……" : "正在思考……"
         if sessionMode == .context && sessionContext == nil {
-            contextStatus = "本次仅使用口述原文 · 在目标页面按 Fn＋Control 可重新获取上下文"
+            contextStatus = "本次仅使用口述原文 · 在目标页面按 Fn 可重新获取上下文"
         }
         do {
             let output: String
             var replacesSelection = false
             if let processingOperation {
+                processingClock?.llmStarted = processingNow()
                 let answer = try await processingOperation(text, sessionMode, sessionTargetLanguage,
                                                           library.dictionaryPrompt, destination?.selectedText ?? "")
                 output = answer.text; replacesSelection = answer.replacesSelection
@@ -566,6 +657,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
                 }
             }
             guard session == token, !Task.isCancelled else { return false }
+            if processingOperation != nil { processingClock?.endLLM(at: processingNow()) }
             let references = answerSources.enumerated().map { index, source in
                 let title = source.title.replacingOccurrences(of: "[", with: "（").replacingOccurrences(of: "]", with: "）")
                     .replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\n", with: " ")
@@ -592,22 +684,24 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
     }
     @discardableResult
     private func saveHistory(succeeded: Bool, cancelled: Bool = false) -> Bool {
+        processingClock?.finish(at: processingNow())
         sessionSucceeded = succeeded; sessionCancelled = cancelled
         guard library.retention != .never else { historySavePending = false; return true }
         let saved: Bool
         if let sessionHistoryID {
             saved = library.updateHistory(id: sessionHistoryID, raw: raw, text: result, succeeded: succeeded,
                                           cancelled: cancelled, mode: sessionMode.rawValue, targetLanguage: sessionTargetLanguage,
-                contextCaptureStatus: sessionMode == .context ? contextStatus : nil)
+                contextCaptureStatus: sessionMode.capturesContext ? contextStatus : nil, timings: processingClock?.value, agentTaskID: sessionAgentTaskID)
         } else {
             sessionHistoryID = library.addHistory(raw: raw, text: result, duration: seconds,
                 application: destination?.name ?? "Hello", mode: sessionMode.rawValue,
                 succeeded: succeeded, cancelled: cancelled, audio: audioURL,
                 language: sessionLanguage, targetLanguage: sessionTargetLanguage,
-                contextCaptureStatus: sessionMode == .context ? contextStatus : nil,
-                contextInputText: sessionMode == .context ? sessionContext?.inputText : nil,
-                contextWindowTitle: sessionMode == .context ? sessionContext?.windowTitle : nil,
-                contextScreenshotDataURL: sessionMode == .context ? sessionContext?.imageDataURL : nil)
+                contextCaptureStatus: sessionMode.capturesContext ? contextStatus : nil,
+                contextInputText: sessionMode.capturesContext ? sessionContext?.inputText : nil,
+                contextWindowTitle: sessionMode.capturesContext ? sessionContext?.windowTitle : nil,
+                contextScreenshotDataURL: sessionMode.capturesContext ? sessionContext?.imageDataURL : nil,
+                timings: processingClock?.value, agentTaskID: sessionAgentTaskID)
             saved = sessionHistoryID != nil
         }
         historySavePending = !saved
@@ -659,14 +753,28 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         memoryCapture?.finish(); memoryCapture = nil
         if memory.enabled, sessionMode == .dictate || sessionMode == .context {
             let token = session
-            memoryCapture = destination.memoryCapture(for: result) { [weak self] before, after in
+            let application = destination.name
+            memoryCapture = destination.memoryCapture(for: result, status: { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .waiting: self.memory.captureStatus = "正在确认向\(application)写入的文字…"
+                case .observing: self.memory.captureStatus = "已确认输入，正在观察\(application)中的纠正（最长 30 秒）。"
+                case .captured: self.memory.captureStatus = "已捕获纠正，等待空闲时整理为记忆建议。"
+                case .finished: self.memory.captureStatus = "本次观察结束，未发现可学习的稳定纠正。"
+                case .cancelled: self.memory.captureStatus = "未能确认文字写入，已停止本次观察。"
+                }
+            }) { [weak self] before, after in
                 self?.memory.record(before: before, after: after, session: token)
+            }
+            if memoryCapture == nil {
+                memory.captureStatus = "\(application)的当前输入框未开放完整文字或光标位置，暂时无法自动学习；可用“记住一个写法”手动添加。"
             }
         }
         status = destination.insert(result, requireOriginalSelection: requireOriginalSelection)
         memoryCapture?.start()
     }
     func cancel(preservingRecording: Bool = false) {
+        processingClock?.finish(at: processingNow())
         let wasProcessing = phase == .transcribing || phase == .polishing
         let wasRecording = phase == .recording
         if wasRecording { seconds = recorder?.currentTime ?? seconds }
@@ -709,12 +817,12 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         }
         canRetryProcessing = false; apiRetryAttempt = 0
         discardSessionAudio()
-        session = UUID(); sessionHistoryID = id
+        session = UUID(); sessionHistoryID = id; sessionAgentTaskID = entry.agentTaskID
         historySavePending = false; sessionSucceeded = entry.succeeded; sessionCancelled = entry.cancelled
         audioURL = workingAudio; hasRecording = workingAudio != nil
         destination = nil // Never reuse an old application/selection for a history retry.
         sessionContext = nil; contextStatus = "历史未保存页面上下文 · 本次仅使用口述原文"
-        if entry.mode == "context", entry.contextInputText != nil || entry.contextScreenshotFileName != nil {
+        if ["context", "ask"].contains(entry.mode), entry.contextInputText != nil || entry.contextScreenshotFileName != nil {
             let screenshot = library.screenshotURL(for: id).flatMap { try? Data(contentsOf: $0) }
             contextStatus = entry.contextCaptureStatus ?? "使用历史保存的页面上下文"
             sessionContext = VoiceContext(application: entry.application, windowTitle: entry.contextWindowTitle ?? "",
@@ -724,6 +832,7 @@ final class VoiceModel: NSObject, ObservableObject, AVAudioRecorderDelegate, AVA
         sessionMode = InputMode(rawValue: entry.mode) ?? .dictate; mode = sessionMode
         sessionLanguage = entry.language; sessionTargetLanguage = entry.targetLanguage
         raw = entry.raw; result = entry.text; seconds = entry.duration; showAnswer = false
+        processingClock = ProcessingClock(started: processingNow())
         if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             recognize()
         } else {

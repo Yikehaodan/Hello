@@ -78,19 +78,21 @@ private final class DeferredGatewayTransport: URLProtocol {
         let transport = URLSession(configuration: config)
         defer { transport.invalidateAndCancel() }
         var factories = 0
+        var now: TimeInterval = 100
         let model = VoiceModel(library: LibraryStore(root: root.appendingPathComponent("history")),
             sessionRoot: root.appendingPathComponent("sessions"), preferences: preferences,
-            requestMicrophoneAccess: { true }, transcriptionOperation: { _, _, _ in "明天下午开会。" },
+            requestMicrophoneAccess: { true }, transcriptionOperation: { _, _, _ in now += 0.5; return "明天下午开会。" },
             recordingFactory: { url, _ in try FixtureRecording(url: url) },
             gatewayFactory: { retry in
                 factories += 1
                 return try Gateway(base: "https://warmup.invalid", key: "fixture", model: "fixture", transport: transport,
                     retryWait: { _ in preconditionFailure("No retries expected") }, onRetry: retry)
-            })
+            }, destinationCapture: { _ in nil }, processingNow: { now })
         model.autoPolish = true
         DeferredGatewayTransport.reset()
         model.toggle(mode: .dictate)
         await eventually { model.phase == .recording && DeferredGatewayTransport.count("/models") == 1 }
+        now = 200
         model.stop()
         await eventually { model.phase == .polishing && DeferredGatewayTransport.count("/chat/completions") == 1 }
         precondition(DeferredGatewayTransport.count("/models", canceled: true) == 0,
@@ -98,9 +100,22 @@ private final class DeferredGatewayTransport: URLProtocol {
         precondition(factories == 1, "Warmup and generation must reuse one gateway")
         print("PASS: generation starts without waiting for warmup; ASR handoff preserves the handshake and gateway")
         DeferredGatewayTransport.finish("/models")
+        now = 202
         model.cancel()
         await eventually { DeferredGatewayTransport.count("/chat/completions", canceled: true) == 1 }
         precondition(model.phase == .ready && model.result.isEmpty)
+        precondition(model.library.history[0].timings == HistoryTimings(total: 2, asr: 0.5, llm: 1.5),
+                     "Production Gateway timing excludes warmup and freezes on cancellation")
+
+        let historyID = model.library.history[0].id
+        DeferredGatewayTransport.reset()
+        now = 300; model.retryHistory(id: historyID)
+        await eventually { DeferredGatewayTransport.count("/chat/completions") == 1 }
+        now = 301.25; DeferredGatewayTransport.finish("/chat/completions")
+        await eventually { model.phase == .ready && model.library.history[0].succeeded }
+        precondition(model.library.history[0].timings == HistoryTimings(total: 1.25, llm: 1.25),
+                     "Production Gateway closes its timing interval before history is saved")
+        print("PASS: production request timing persists for canceled and successful attempts without warmup time")
 
         DeferredGatewayTransport.reset()
         model.toggle(mode: .dictate)
@@ -109,7 +124,7 @@ private final class DeferredGatewayTransport: URLProtocol {
         await eventually { DeferredGatewayTransport.count("/models", canceled: true) == 1 }
         try await Task.sleep(for: .milliseconds(80))
         precondition(DeferredGatewayTransport.count("/models") == 1 && DeferredGatewayTransport.count("/chat/completions") == 0)
-        precondition(factories == 2)
+        precondition(factories == 3)
         print("PASS: cancel stops warmup and generation; a new recording gets a new gateway; no microphone, clipboard or network used")
     }
     @MainActor static func eventually(_ predicate: () -> Bool) async {

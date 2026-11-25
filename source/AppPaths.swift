@@ -23,6 +23,7 @@ enum AppPaths {
         }
         return data.appendingPathComponent("gateway.env")
     }
+    static var bailianSpeech: URL { data.appendingPathComponent("bailian.env") }
     static var speechModels: URL {
         if let path = ProcessInfo.processInfo.environment["HELLO_MODELS_DIR"] ?? ProcessInfo.processInfo.environment["KNOCK_MODELS_DIR"], path.hasPrefix("/") {
             return URL(fileURLWithPath: path, isDirectory: true)

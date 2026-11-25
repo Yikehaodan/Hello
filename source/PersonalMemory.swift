@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-struct MemoryEvidence: Codable, Identifiable, Equatable {
+struct MemoryEvidence: Codable, Identifiable, Equatable, Sendable {
     var id = UUID()
     var session: UUID
     var date = Date()
@@ -18,7 +18,7 @@ struct MemoryProposal: Codable, Equatable {
     var scope: PersonalMemory.Scope
 }
 
-struct PersonalMemory: Codable, Identifiable, Equatable {
+struct PersonalMemory: Codable, Identifiable, Equatable, Sendable {
     enum Kind: String, Codable { case correction, expression }
     enum Scope: String, Codable { case person, term, dictation }
     enum State: String, Codable { case suggested, active, paused }
@@ -86,12 +86,14 @@ final class MemoryStore: ObservableObject {
     @Published var latestAutomaticID: UUID?
     @Published private(set) var processing = false
     @Published private(set) var message = "开启后，学习你对 Hello 输入文字的纠正。"
+    @Published var captureStatus = "最近还没有观察到输入后的纠正。"
     @Published private(set) var error: String?
     let file: URL
     var consolidator: Consolidator?
     var onDisabled: (() -> Void)?
     private var state = Snapshot()
-    private var lastRead: Data?
+    private var database: LocalDatabase?
+    private struct Settings: Codable { var enabled: Bool; var dismissed: [String] }
     private var loadFailed = false
     private var task: Task<Void, Never>?
     private var busy = false
@@ -118,28 +120,79 @@ final class MemoryStore: ObservableObject {
     func reload() {
         cancelWork()
         do {
-            if FileManager.default.fileExists(atPath: file.path) {
-                try checkFile()
-                let data = try Data(contentsOf: file)
-                guard data.count <= 512 * 1024, let markdown = String(data: data, encoding: .utf8),
-                      let start = markdown.range(of: Self.marker),
-                      let end = markdown.range(of: "\n```", range: start.upperBound..<markdown.endIndex) else {
-                    throw VoiceError.message("memory.md 格式无法识别，原文件已保留。")
-                }
-                let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(markdown[start.upperBound..<end.lowerBound].utf8))
-                guard snapshot.version == 1, snapshot.memories.count <= 200, snapshot.evidence.count <= 200,
-                      snapshot.dismissed.count <= 1000,
-                      Set(snapshot.memories.map(\.id)).count == snapshot.memories.count,
-                      Set(snapshot.evidence.map(\.id)).count == snapshot.evidence.count,
-                      snapshot.evidence.allSatisfy({ $0.before.count <= 100 && $0.after.count <= 100 }),
-                      snapshot.memories.allSatisfy({ !$0.original.isEmpty && !$0.preferred.isEmpty && $0.original.count <= 48 && $0.preferred.count <= 48 && $0.sessions.count <= 200 && $0.evidenceIDs.count <= 200 }) else {
-                    throw VoiceError.message("memory.md 内容超过限制，原文件已保留。")
-                }
-                state = snapshot; lastRead = data
-            } else { state = Snapshot(); lastRead = nil }
-            loadFailed = false; error = nil; publish(); prune()
+            let db = try LocalDatabase(root: file.deletingLastPathComponent())
+            database = db
+            let migrated: Bool = try db.metadata("memory-migrated") ?? false
+            let snapshot: Snapshot
+            if migrated {
+                let settings: Settings = try db.metadata("memory-settings") ?? Settings(enabled: false, dismissed: [])
+                snapshot = Snapshot(enabled: settings.enabled, memories: try db.all("memory"),
+                    evidence: try db.all("evidence"), dismissed: settings.dismissed)
+            } else if FileManager.default.fileExists(atPath: file.path) {
+                snapshot = try readExport(file)
+            } else { snapshot = Snapshot() }
+            try validate(snapshot)
+            if !migrated {
+                try LocalDatabase.backupLegacy(file)
+                try persist(snapshot, previous: Snapshot())
+            }
+            state = snapshot; loadFailed = false; error = nil; publish(); prune()
             if !enabled { onDisabled?() }
         } catch { loadFailed = true; self.error = error.localizedDescription; enabled = false; onDisabled?() }
+    }
+    private func validate(_ snapshot: Snapshot) throws {
+        guard snapshot.version == 1, snapshot.memories.count <= 200, snapshot.evidence.count <= 200,
+              snapshot.dismissed.count <= 1000,
+              Set(snapshot.memories.map(\.id)).count == snapshot.memories.count,
+              Set(snapshot.evidence.map(\.id)).count == snapshot.evidence.count,
+              snapshot.evidence.allSatisfy({ $0.before.count <= 100 && $0.after.count <= 100 }),
+              snapshot.memories.allSatisfy({ !$0.original.isEmpty && !$0.preferred.isEmpty && $0.original.count <= 48 && $0.preferred.count <= 48 && $0.sessions.count <= 200 && $0.evidenceIDs.count <= 200 }) else {
+            throw VoiceError.message("记忆内容超过限制，原文件已保留。")
+        }
+    }
+    private func readExport(_ url: URL) throws -> Snapshot {
+        let info = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey])
+        guard info.isSymbolicLink != true, info.isRegularFile == true, (info.fileSize ?? 0) <= 512 * 1024 else {
+            throw VoiceError.message("记忆文件不是可读取的普通文件。")
+        }
+        let data = try Data(contentsOf: url)
+        guard let markdown = String(data: data, encoding: .utf8), let start = markdown.range(of: Self.marker),
+              let end = markdown.range(of: "\n```", range: start.upperBound..<markdown.endIndex) else {
+            throw VoiceError.message("记忆文件格式无法识别，原文件已保留。")
+        }
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(markdown[start.upperBound..<end.lowerBound].utf8))
+        try validate(snapshot)
+        return snapshot
+    }
+    func importFile(_ url: URL) {
+        cancelWork()
+        guard !loadFailed else { error = "请先修复数据库并刷新，当前记忆不会覆盖。"; return }
+        do {
+            let snapshot = try readExport(url)
+            try persist(snapshot, previous: state)
+            state = snapshot; error = nil; publish(); prune()
+            if !enabled { onDisabled?() }
+        } catch { self.error = error.localizedDescription }
+    }
+    func exportFile() throws -> URL {
+        guard !loadFailed else { throw VoiceError.message("记忆未能读取，无法导出。") }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        let json = String(decoding: try encoder.encode(state), as: UTF8.self)
+        let summary = state.memories.map { "- [\($0.state.rawValue)] \($0.original) → \($0.preferred)" }.joined(separator: "\n")
+        let markdown = "# Hello 个人记忆\n\n这是导出的副本。编辑后请在应用中选择“导入记忆”。\n\n\(summary)\n\n```json\n\(json)\n```\n"
+        // A user-owned export, separate from the database and migration originals.
+        let export = file.deletingLastPathComponent().appendingPathComponent("memory-export-\(UUID().uuidString.prefix(8)).md")
+        try Data(markdown.utf8).write(to: export, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: export.path)
+        return export
+    }
+    func evidencePage(offset: Int) async throws -> DatabasePage<MemoryEvidence> {
+        guard !loadFailed, let database else { throw VoiceError.message(error ?? "记忆未就绪。") }
+        return try await database.readPage("evidence", query: "", category: "all", offset: offset)
+    }
+    func memoryPage(query: String, offset: Int) async throws -> DatabasePage<PersonalMemory> {
+        guard !loadFailed, let database else { throw VoiceError.message(error ?? "记忆未就绪。") }
+        return try await database.readPage("memory", query: query, category: "all", offset: offset)
     }
 
     func setEnabled(_ value: Bool) {
@@ -255,7 +308,7 @@ final class MemoryStore: ObservableObject {
     func prompt(for text: String, mode: String) -> String {
         guard enabled, !loadFailed else { return "" }
         let matches = memories.filter {
-            $0.state == .active && ($0.kind != .expression || mode == "dictate") &&
+            $0.state == .active && ($0.kind != .expression || mode == "dictate" || mode == "context") &&
             (text.localizedCaseInsensitiveContains($0.original) || text.localizedCaseInsensitiveContains($0.preferred))
         }.sorted { $0.updated > $1.updated }.prefix(6)
         guard !matches.isEmpty else { return "" }
@@ -346,34 +399,28 @@ final class MemoryStore: ObservableObject {
     private func cancelWork() {
         revision = UUID(); task?.cancel(); task = nil; processing = false
     }
-    private func checkFile() throws {
-        let values = try file.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .fileSizeKey])
-        guard values.isSymbolicLink != true, values.isRegularFile == true, (values.fileSize ?? 0) <= 512 * 1024 else {
-            throw VoiceError.message("memory.md 不是可读取的普通文件。")
+    private func persist(_ next: Snapshot, previous: Snapshot) throws {
+        guard let database else { throw VoiceError.message("记忆数据库未就绪。") }
+        try database.transaction {
+            try database.sync("memory", old: previous.memories, new: next.memories, ordered: true) { item, position in
+                DatabaseIndex(date: item.updated, category: item.state.rawValue,
+                    search: item.original + "\n" + item.preferred, position: position)
+            }
+            try database.sync("evidence", old: previous.evidence, new: next.evidence, ordered: true) { item, position in
+                DatabaseIndex(date: item.date, search: item.before + "\n" + item.after, position: position)
+            }
+            try database.setMetadata("memory-settings", Settings(enabled: next.enabled, dismissed: next.dismissed))
+            try database.setMetadata("memory-migrated", true)
         }
     }
     private func mutate(_ change: (inout Snapshot) throws -> Void) {
-        guard !loadFailed else { error = "请修复 memory.md 后重新读取；原文件不会覆盖。"; return }
+        guard !loadFailed else { error = "请先修复数据库并刷新，原数据不会覆盖。"; return }
         do {
-            if FileManager.default.fileExists(atPath: file.path) { try checkFile() }
-            let disk = try? Data(contentsOf: file)
-            guard disk == lastRead else { throw VoiceError.message("memory.md 已在外部更改，请先重新读取。") }
             var next = state
             try change(&next)
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            let json = String(decoding: try encoder.encode(next), as: UTF8.self)
-            let summary = next.memories.map { "- [\($0.state.rawValue)] \($0.original) → \($0.preferred)（\($0.scope.rawValue)，\($0.sessions.count) 次独立纠正）" }.joined(separator: "\n")
-            let markdown = "# Hello 个人记忆\n\n通过应用的个人记忆页面管理。下方 JSON 是唯一读取的数据；上方摘要由应用生成。\n候选片段最多保留 30 天。停用不会删除记忆。\n\n## 已整理的记忆\n\n\(summary)\n\n## 结构化记录\n\n```json\n\(json)\n```\n"
-            let data = Data(markdown.utf8)
-            guard data.count <= 512 * 1024 else { throw VoiceError.message("记忆文件已达上限，请先清理候选。") }
-            let manager = FileManager.default
-            try manager.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let temp = file.deletingLastPathComponent().appendingPathComponent(".memory-" + UUID().uuidString)
-            defer { try? manager.removeItem(at: temp) }
-            guard manager.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else { throw VoiceError.message("无法保存记忆。") }
-            if manager.fileExists(atPath: file.path) { _ = try manager.replaceItemAt(file, withItemAt: temp) }
-            else { try manager.moveItem(at: temp, to: file) }
-            state = next; lastRead = data; error = nil; publish()
+            try validate(next)
+            try persist(next, previous: state)
+            state = next; error = nil; publish()
         } catch { self.error = error.localizedDescription }
     }
     private func publish() { memories = state.memories; evidence = state.evidence; enabled = state.enabled }

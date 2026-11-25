@@ -11,8 +11,15 @@ func color(_ hex: UInt32) -> NSColor {
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
 let context = NSGraphicsContext.current!.cgContext
+context.clear(CGRect(x: 0, y: 0, width: 1024, height: 1024))
 context.translateBy(x: 0, y: 1024)
 context.scaleBy(x: 1, y: -1)
+// Keep the visible tile inside the same inset as neighboring macOS Dock icons.
+// Scale all artwork together; transparent padding belongs in every ICNS size.
+let artworkScale: CGFloat = 824.0 / 960.0
+let artworkInset = (1024 - 1024 * artworkScale) / 2
+context.translateBy(x: artworkInset, y: artworkInset)
+context.scaleBy(x: artworkScale, y: artworkScale)
 let tile = NSBezierPath(roundedRect: NSRect(x: 32, y: 32, width: 960, height: 960), xRadius: 214, yRadius: 214)
 NSGradient(starting: color(0x244E43), ending: color(0x0D2B28))!.draw(in: tile, angle: 45)
 NSColor.white.withAlphaComponent(0.1).setStroke()

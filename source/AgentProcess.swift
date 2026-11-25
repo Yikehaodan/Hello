@@ -4,6 +4,7 @@ import Foundation
 final class AgentProcess {
     private let process = Process()
     private let input = Pipe()
+    private let inputWriter = DispatchQueue(label: "Hello.agent-input", qos: .userInitiated)
     private var stopped = false
     var onEvent: (([String: Any]) -> Void)?
     var onExit: (() -> Void)?
@@ -47,8 +48,15 @@ final class AgentProcess {
     }
     func send(_ payload: [String: Any]) {
         guard process.isRunning, let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        do { try input.fileHandleForWriting.write(contentsOf: data + Data([10])) }
-        catch { onEvent?(["type": "error", "text": "Agent 通信已断开，任务未完成。"] ) }
+        let handle = input.fileHandleForWriting
+        // Screenshot payloads may fill the pipe while the SDK starts. Preserve
+        // message order without blocking the recording HUD or permission buttons.
+        inputWriter.async { [weak self] in
+            do { try handle.write(contentsOf: data + Data([10])) }
+            catch { Task { @MainActor [weak self] in
+                self?.onEvent?(["type": "error", "text": "Agent 通信已断开，任务未完成。"])
+            } }
+        }
     }
     func cancel() {
         guard !stopped else { return }; stopped = true

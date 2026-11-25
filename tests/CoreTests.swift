@@ -10,7 +10,7 @@ struct CoreTests {
         var gesture = FnGesture()
         check(gesture.consume(type: .flagsChanged, key: 63, flags: fn).trigger == false, "Fn press waits for release")
         check(gesture.consume(type: .flagsChanged, key: 63, flags: fn).trigger == false, "Fn repeat ignored")
-        check(gesture.consume(type: .flagsChanged, key: 63, flags: []).trigger && gesture.triggeredMode == .dictate, "Fn release starts dictate")
+        check(gesture.consume(type: .flagsChanged, key: 63, flags: []).trigger && gesture.triggeredMode == .context, "Fn release starts context dictation")
         check(!gesture.consume(type: .flagsChanged, key: 63, flags: []).trigger, "duplicate release ignored")
 
         gesture = FnGesture()
@@ -51,53 +51,48 @@ struct CoreTests {
             check(!gesture.consume(type: .flagsChanged, key: 63, flags: fn.union(modifier), isRecording: true).trigger, "pre-existing unrelated modifier does not stop recording")
         }
 
-        for order in [true, false] {
-            gesture = FnGesture()
-            if order {
-                _ = gesture.consume(type: .flagsChanged, key: 56, flags: leftShift)
-                _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn.union(leftShift))
-            } else {
-                _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn)
-                _ = gesture.consume(type: .flagsChanged, key: 56, flags: fn.union(leftShift))
+        for (key, flag, mode) in [(Int64(56), leftShift, InputMode.translate), (60, rightShift, .translate)] {
+            for modifierFirst in [false, true] {
+                for fnFirstRelease in [false, true] {
+                    gesture = FnGesture()
+                    if modifierFirst { _ = gesture.consume(type: .flagsChanged, key: key, flags: flag, now: 70) }
+                    let fnDown = gesture.consume(type: .flagsChanged, key: 63, flags: modifierFirst ? fn.union(flag) : fn, now: 71)
+                    if modifierFirst {
+                        check(fnDown.trigger && gesture.triggeredMode == mode, "modifier-first chord starts on Fn down")
+                    } else {
+                        check(!fnDown.trigger, "lone Fn waits")
+                        _ = gesture.consumeLongPress(now: 72)
+                        check(gesture.consume(type: .flagsChanged, key: key, flags: fn.union(flag), now: 73).trigger && gesture.triggeredMode == mode,
+                              "Fn-first chord starts on modifier down even after lone Fn timeout")
+                    }
+                    check(gesture.longPressDeadline == nil, "explicit chord has no hold deadline")
+                    check(!gesture.consume(type: .flagsChanged, key: key, flags: fn.union(flag), now: 74, isRecording: true).trigger, "modifier repeat cannot stop recording")
+                    check(!gesture.consume(type: .flagsChanged, key: fnFirstRelease ? 63 : key, flags: fnFirstRelease ? flag : fn, now: 75, isRecording: true).trigger, "first release cannot stop recording")
+                    check(!gesture.consume(type: .flagsChanged, key: fnFirstRelease ? key : 63, flags: [], now: 76, isRecording: true).trigger, "final release cannot stop recording")
+                    check(gesture.consume(type: .flagsChanged, key: 63, flags: fn, now: 77, isRecording: true).trigger, "next independent Fn stops immediately")
+                    check(!gesture.consume(type: .flagsChanged, key: key, flags: fn.union(flag), now: 78).trigger, "modifier added after stop cannot restart")
+                    _ = gesture.consume(type: .flagsChanged, key: 63, flags: flag, now: 79)
+                    check(!gesture.consume(type: .flagsChanged, key: key, flags: [], now: 80).trigger, "stop chord release cannot restart")
+                }
             }
-            check(!gesture.consume(type: .flagsChanged, key: 63, flags: leftShift).trigger, "translation waits for held Shift after Fn release")
-            check(gesture.consume(type: .flagsChanged, key: 56, flags: []).trigger && gesture.triggeredMode == .translate, "left Shift translation starts on full release in either press order")
         }
-        gesture = FnGesture()
-        _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn)
-        _ = gesture.consume(type: .flagsChanged, key: 56, flags: fn.union(leftShift))
-        _ = gesture.consume(type: .flagsChanged, key: 56, flags: fn)
-        check(gesture.consume(type: .flagsChanged, key: 63, flags: []).trigger && gesture.triggeredMode == .translate, "translation survives Shift-first release")
 
-        for order in [true, false] {
-            gesture = FnGesture()
-            if order {
-                _ = gesture.consume(type: .flagsChanged, key: 60, flags: rightShift)
-                _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn.union(rightShift))
-            } else {
-                _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn)
-                _ = gesture.consume(type: .flagsChanged, key: 60, flags: fn.union(rightShift))
+        for controlKey: Int64 in [59, 62] {
+            for controlFirst in [false, true] {
+                for fnReleasedFirst in [false, true] {
+                    gesture = FnGesture()
+                    if controlFirst { _ = gesture.consume(type: .flagsChanged, key: controlKey, flags: .maskControl, now: 90) }
+                    check(!gesture.consume(type: .flagsChanged, key: 63, flags: controlFirst ? fn.union(.maskControl) : fn, now: 90.1).trigger, "Disabled Control chord cannot start on Fn press")
+                    check(!gesture.consume(type: .flagsChanged, key: controlKey, flags: fn.union(.maskControl), now: 90.2).trigger, "Disabled Control chord cannot start on Control press")
+                    check(!gesture.consume(type: .flagsChanged, key: fnReleasedFirst ? 63 : controlKey, flags: fnReleasedFirst ? .maskControl : fn, now: 90.3).trigger, "First release cannot trigger disabled chord")
+                    check(!gesture.consume(type: .flagsChanged, key: fnReleasedFirst ? controlKey : 63, flags: [], now: 90.4).trigger, "Final release cannot fall back to lone Fn")
+                    _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn, now: 91)
+                    check(gesture.consume(type: .flagsChanged, key: 63, flags: [], now: 91.1).trigger && gesture.triggeredMode == .context, "Lone Fn still starts context after disabled chord")
+                }
             }
-            check(!gesture.consume(type: .flagsChanged, key: 63, flags: rightShift).trigger, "translation waits for right Shift release")
-            check(gesture.consume(type: .flagsChanged, key: 60, flags: []).trigger && gesture.triggeredMode == .translate, "right Shift translation works in either order")
-        }
-        gesture = FnGesture()
-        _ = gesture.consume(type: .flagsChanged, key: 56, flags: leftShift)
-        _ = gesture.consume(type: .flagsChanged, key: 60, flags: leftShift.union(rightShift))
-        _ = gesture.consume(type: .flagsChanged, key: 56, flags: rightShift)
-        _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn.union(rightShift))
-        check(!gesture.consume(type: .flagsChanged, key: 63, flags: rightShift).trigger, "released left Shift does not remain down while right Shift held")
-
-        for shiftKey: Int64 in [56, 60] {
             gesture = FnGesture()
-            _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn, now: 80)
-            check(gesture.consumeLongPress(now: 81), "lone Fn expires before translation chord")
-            _ = gesture.consume(type: .flagsChanged, key: shiftKey, flags: fn.union(.maskShift), now: 82)
-            check(gesture.longPressDeadline == nil, "explicit translation chord has no short-press deadline")
-            _ = gesture.consume(type: .flagsChanged, key: 63, flags: .maskShift, now: 84)
-            check(gesture.consume(type: .flagsChanged, key: shiftKey, flags: [], now: 85).trigger && gesture.triggeredMode == .translate,
-                  "slow Fn Shift chord starts translation exactly on full release")
-            check(!gesture.consume(type: .flagsChanged, key: shiftKey, flags: [], now: 86).trigger, "translation release never repeats")
+            _ = gesture.consume(type: .flagsChanged, key: controlKey, flags: .maskControl)
+            check(!gesture.consume(type: .flagsChanged, key: 63, flags: fn.union(.maskControl), isRecording: true).trigger, "Control-held Fn does not stop recording")
         }
 
         for fnReleasedFirst in [false, true] {
@@ -116,22 +111,6 @@ struct CoreTests {
                 check(!gesture.consume(type: .flagsChanged, key: 63, flags: [], now: 100.5).trigger, "Fn release cannot toggle Ask again")
             }
             check(!gesture.consume(type: .keyDown, key: 49, flags: [], now: 100.55).suppress, "next ordinary Space passes through")
-        }
-        for fnReleasedFirst in [false, true] {
-            gesture = FnGesture()
-            _ = gesture.consume(type: .flagsChanged, key: 63, flags: fn, now: 110)
-            _ = gesture.consume(type: .flagsChanged, key: 56, flags: fn.union(leftShift), now: 110.2)
-            if fnReleasedFirst {
-                _ = gesture.consume(type: .flagsChanged, key: 63, flags: leftShift, now: 110.3)
-            } else {
-                _ = gesture.consume(type: .flagsChanged, key: 56, flags: fn, now: 110.3)
-            }
-            check(!gesture.consumeLongPress(now: 110.59) && !gesture.consumeLongPress(now: 110.6),
-                  "explicit translation chord is not expired by the lone Fn hold deadline")
-            check(!gesture.consumeLongPress(now: 111), "long chord emits one warning")
-            let finalRelease = gesture.consume(type: .flagsChanged, key: fnReleasedFirst ? 56 : 63, flags: [], now: 111.1)
-            check(finalRelease.trigger && gesture.triggeredMode == .translate && !gesture.ignoredLongPress,
-                  "releasing held translation starts once without a long-press warning")
         }
         for timerFired in [false, true] {
             for fnReleasedFirst in [false, true] {
@@ -195,31 +174,7 @@ struct CoreTests {
         _ = gesture.consume(type: .keyUp, key: 123, flags: fn)
         check(!gesture.consume(type: .flagsChanged, key: 63, flags: []).trigger, "arrow-provided function flag never arms Fn")
 
-        for controlKey: Int64 in [59, 62] {
-            for controlFirst in [false, true] {
-                for fnReleasedFirst in [false, true] {
-                    gesture = FnGesture()
-                    if controlFirst { _ = gesture.consume(type: .flagsChanged, key: controlKey, flags: .maskControl, now: 200) }
-                    _ = gesture.consume(type: .flagsChanged, key: 63, flags: controlFirst ? fn.union(.maskControl) : fn, now: 201)
-                    if !controlFirst {
-                        _ = gesture.consumeLongPress(now: 202)
-                        _ = gesture.consume(type: .flagsChanged, key: controlKey, flags: fn.union(.maskControl), now: 203)
-                    }
-                    check(gesture.longPressDeadline == nil, "Fn Control has no hold timeout")
-                    let first = gesture.consume(type: .flagsChanged, key: fnReleasedFirst ? 63 : controlKey,
-                                                flags: fnReleasedFirst ? .maskControl : fn, now: 204)
-                    check(!first.trigger, "context waits for both keys to release")
-                    check(gesture.consume(type: .flagsChanged, key: fnReleasedFirst ? controlKey : 63, flags: [], now: 205).trigger && gesture.triggeredMode == .context,
-                          "both Controls and both press/release orders start context, not translation")
-                    check(!gesture.consume(type: .flagsChanged, key: controlKey, flags: [], now: 206).trigger, "context release cannot repeat")
-                    check(gesture.consume(type: .flagsChanged, key: 63, flags: fn, now: 207, isRecording: true).trigger, "Fn stops context immediately")
-                    _ = gesture.consume(type: .flagsChanged, key: controlKey, flags: fn.union(.maskControl), now: 208)
-                    _ = gesture.consume(type: .flagsChanged, key: 63, flags: .maskControl, now: 209)
-                    check(!gesture.consume(type: .flagsChanged, key: controlKey, flags: [], now: 210).trigger, "Control added to stop cannot restart context")
-                }
-            }
-        }
-        check(InputMode.translate.shortcut == "Fn ⇧" && InputMode.context.shortcut == "Fn ⌃", "shortcut labels match routing")
+        check(InputMode.translate.shortcut == "Fn ⇧" && InputMode.context.shortcut == "Fn" && InputMode.dictate.shortcut == "手动", "shortcut labels match routing")
         let pasteModifiers: CGEventFlags = [.maskCommand, .maskControl]
         var paste = PasteLastGesture()
         var pasteCount = 0

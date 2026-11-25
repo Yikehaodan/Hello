@@ -1,7 +1,17 @@
 import Foundation
 import Combine
 
-struct HistoryEntry: Identifiable, Codable, Equatable {
+struct HistoryTimings: Codable, Equatable, Sendable {
+    var total: Double
+    var asr: Double?
+    var llm: Double?
+
+    var isValid: Bool {
+        [total, asr, llm].compactMap { $0 }.allSatisfy { $0.isFinite && $0 >= 0 }
+    }
+}
+
+struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var id = UUID()
     var date = Date()
     var raw: String
@@ -18,11 +28,14 @@ struct HistoryEntry: Identifiable, Codable, Equatable {
     var contextInputText: String? = nil
     var contextWindowTitle: String? = nil
     var contextScreenshotFileName: String? = nil
+    var timings: HistoryTimings? = nil
+    var agentTaskID: UUID? = nil
 }
 
 extension HistoryEntry {
     private enum CodingKeys: String, CodingKey {
         case id, date, raw, text, duration, application, mode, succeeded, cancelled, audioFileName, language, targetLanguage, contextCaptureStatus, contextInputText, contextWindowTitle, contextScreenshotFileName
+        case timings, agentTaskID
     }
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -42,10 +55,12 @@ extension HistoryEntry {
         contextInputText = try values.decodeIfPresent(String.self, forKey: .contextInputText)
         contextWindowTitle = try values.decodeIfPresent(String.self, forKey: .contextWindowTitle)
         contextScreenshotFileName = try values.decodeIfPresent(String.self, forKey: .contextScreenshotFileName)
+        agentTaskID = try values.decodeIfPresent(UUID.self, forKey: .agentTaskID)
+        timings = try values.decodeIfPresent(HistoryTimings.self, forKey: .timings)
     }
 }
 
-struct DictionaryWord: Identifiable, Codable, Equatable {
+struct DictionaryWord: Identifiable, Codable, Equatable, Sendable {
     enum Source: String, Codable { case manual, automatic }
     var id = UUID()
     var text: String
@@ -86,7 +101,12 @@ enum LibraryStoreError: LocalizedError {
 
 @MainActor
 final class LibraryStore: ObservableObject {
-    @Published private(set) var history: [HistoryEntry] = []
+    @Published private(set) var history: [HistoryEntry] = [] {
+        didSet {
+            historyByID = Dictionary(uniqueKeysWithValues: history.map { ($0.id, $0) })
+            cachedStatistics = nil
+        }
+    }
     @Published private(set) var words: [DictionaryWord] = []
     @Published private(set) var errorMessage: String?
     @Published var retention: HistoryRetention = .forever {
@@ -110,6 +130,7 @@ final class LibraryStore: ObservableObject {
         var words: [DictionaryWord]
     }
     var dataDirectory: URL { root }
+    private(set) var database: LocalDatabase?
     private let root: URL
     private var file: URL { root.appendingPathComponent("library.json") }
     private var audioRoot: URL { root.appendingPathComponent("recordings", isDirectory: true) }
@@ -117,6 +138,17 @@ final class LibraryStore: ObservableObject {
     private var restoringRetention = false
     private var loadFailed = false
     private var cleanupTimer: Timer?
+    private var historyByID: [UUID: HistoryEntry] = [:]
+    private var cachedStatistics: Statistics?
+    private var statisticsCalendar: Calendar?
+    private static let cjk = try! NSRegularExpression(pattern: "[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]")
+    private static let wordExpression = try! NSRegularExpression(pattern: "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*")
+    struct Statistics {
+        var words = 0
+        var duration: Double = 0
+        var completed = 0
+        var activeDays = 0
+    }
     private static let maximumWords = 2_000
     private static let maximumWordLength = 120
     private static let maximumHistory = 10_000
@@ -139,20 +171,29 @@ final class LibraryStore: ObservableObject {
 
     deinit { cleanupTimer?.invalidate() }
 
-    var totalWords: Int {
-        guard let cjk = try? NSRegularExpression(pattern: "[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]"),
-              let expression = try? NSRegularExpression(pattern: "[\\p{L}\\p{N}]+(?:['’-][\\p{L}\\p{N}]+)*") else { return 0 }
-        return history.filter(\.succeeded).reduce(0) { total, entry in
+    var statistics: Statistics {
+        let calendar = Calendar.current
+        if let cachedStatistics, statisticsCalendar == calendar { return cachedStatistics }
+        var result = Statistics()
+        var days = Set<Date>()
+        for entry in history {
+            days.insert(calendar.startOfDay(for: entry.date))
+            guard entry.succeeded else { continue }
             // Measure what the user dictated, including questions and translation
             // input, so generated answers cannot inflate the voice-usage metric.
             let range = NSRange(entry.raw.startIndex..., in: entry.raw)
-            let remainder = cjk.stringByReplacingMatches(in: entry.raw, range: range, withTemplate: " ")
-            return total + cjk.numberOfMatches(in: entry.raw, range: range) +
-                expression.numberOfMatches(in: remainder, range: NSRange(remainder.startIndex..., in: remainder))
+            let remainder = Self.cjk.stringByReplacingMatches(in: entry.raw, range: range, withTemplate: " ")
+            result.words += Self.cjk.numberOfMatches(in: entry.raw, range: range) +
+                Self.wordExpression.numberOfMatches(in: remainder, range: NSRange(remainder.startIndex..., in: remainder))
+            result.duration += entry.duration
+            result.completed += 1
         }
+        result.activeDays = days.count
+        cachedStatistics = result; statisticsCalendar = calendar
+        return result
     }
-
-    var totalDuration: Double { history.filter(\.succeeded).reduce(0) { $0 + $1.duration } }
+    var totalWords: Int { statistics.words }
+    var totalDuration: Double { statistics.duration }
 
     /// Vocabulary only; the caller decides how to present this to its recognizer.
     var dictionaryPrompt: String { words.map(\.text).joined(separator: "、") }
@@ -161,7 +202,8 @@ final class LibraryStore: ObservableObject {
     func addHistory(raw: String, text: String, duration: Double, application: String,
                     mode: String = "dictate", succeeded: Bool = true, cancelled: Bool = false,
                     audio: URL? = nil, language: String = "auto", targetLanguage: String = "English", contextCaptureStatus: String? = nil,
-                    contextInputText: String? = nil, contextWindowTitle: String? = nil, contextScreenshotDataURL: String? = nil) -> UUID? {
+                    contextInputText: String? = nil, contextWindowTitle: String? = nil, contextScreenshotDataURL: String? = nil,
+                    timings: HistoryTimings? = nil, agentTaskID: UUID? = nil) -> UUID? {
         guard retention != .never else { return nil }
         var copiedAudio: URL?
         var savedScreenshot: URL?
@@ -170,7 +212,7 @@ final class LibraryStore: ObservableObject {
                     !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || audio != nil else { return nil }
             guard raw.count <= Self.maximumTextLength, text.count <= Self.maximumTextLength,
                   duration.isFinite, duration >= 0, application.count <= 300, mode.count <= 40,
-                  language.count <= 40, targetLanguage.count <= 80 else {
+                  language.count <= 40, targetLanguage.count <= 80, timings?.isValid != false else {
                 throw LibraryStoreError.invalid("这条记录超过保存限制，或录音时长无效；当前文字仍保留在窗口中。")
             }
             var entries = retained(history)
@@ -181,7 +223,7 @@ final class LibraryStore: ObservableObject {
                                      mode: mode, succeeded: succeeded, cancelled: cancelled,
                                      language: language, targetLanguage: targetLanguage, contextCaptureStatus: contextCaptureStatus.map { String($0.prefix(300)) },
                                      contextInputText: contextInputText.map { String($0.prefix(12000)) },
-                                     contextWindowTitle: contextWindowTitle.map { String($0.prefix(300)) })
+                                     contextWindowTitle: contextWindowTitle.map { String($0.prefix(300)) }, timings: timings, agentTaskID: agentTaskID)
             if let audio {
                 copiedAudio = try preserveAudio(audio, id: entry.id)
                 entry.audioFileName = copiedAudio?.lastPathComponent
@@ -204,13 +246,14 @@ final class LibraryStore: ObservableObject {
     /// A retry updates its original entry; deleted/expired entries are never recreated.
     @discardableResult
     func updateHistory(id: UUID, raw: String, text: String, succeeded: Bool, cancelled: Bool = false,
-                       mode: String? = nil, targetLanguage: String? = nil, contextCaptureStatus: String? = nil) -> Bool {
+                       mode: String? = nil, targetLanguage: String? = nil, contextCaptureStatus: String? = nil,
+                       timings: HistoryTimings? = nil, agentTaskID: UUID? = nil) -> Bool {
         guard retention != .never else { return false }
         var entries = retained(history)
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return false }
         do {
             guard raw.count <= Self.maximumTextLength, text.count <= Self.maximumTextLength,
-                  (mode?.count ?? 0) <= 40, (targetLanguage?.count ?? 0) <= 80 else {
+                  (mode?.count ?? 0) <= 40, (targetLanguage?.count ?? 0) <= 80, timings?.isValid != false else {
                 throw LibraryStoreError.invalid("处理结果超过历史记录保存限制，当前文字仍保留在窗口中。")
             }
             entries[index].raw = raw; entries[index].text = text
@@ -218,13 +261,15 @@ final class LibraryStore: ObservableObject {
             if let mode { entries[index].mode = mode }
             if let targetLanguage { entries[index].targetLanguage = targetLanguage }
             if let contextCaptureStatus { entries[index].contextCaptureStatus = String(contextCaptureStatus.prefix(300)) }
+            if let timings { entries[index].timings = timings }
+            if let agentTaskID { entries[index].agentTaskID = agentTaskID }
             try save(history: entries, words: words)
             return true
         } catch { report(error); return false }
     }
 
     func audioURL(for id: UUID) -> URL? {
-        guard retention != .never, let entry = retained(history).first(where: { $0.id == id }),
+        guard let entry = retainedEntry(id),
               let name = entry.audioFileName, name == "\(id.uuidString).wav",
               audioDirectoryIsSafe else { return nil }
         let url = audioRoot.appendingPathComponent(name)
@@ -235,12 +280,12 @@ final class LibraryStore: ObservableObject {
     }
 
     func canRetry(_ entry: HistoryEntry) -> Bool {
-        retained(history).contains(where: { $0.id == entry.id }) &&
+        retainedEntry(entry.id) != nil &&
             (!entry.raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || audioURL(for: entry.id) != nil)
     }
 
     func screenshotURL(for id: UUID) -> URL? {
-        guard retention != .never, let entry = retained(history).first(where: { $0.id == id }),
+        guard let entry = retainedEntry(id),
               let name = entry.contextScreenshotFileName, name == "\(id.uuidString).jpg",
               screenshotDirectoryIsSafe else { return nil }
         let url = screenshotRoot.appendingPathComponent(name)
@@ -420,6 +465,12 @@ final class LibraryStore: ObservableObject {
         return entries.filter { $0.date >= cutoff }
     }
 
+    private func retainedEntry(_ id: UUID) -> HistoryEntry? {
+        guard retention != .never, let entry = historyByID[id] else { return nil }
+        if let cutoff = retention.cutoff(before: Date()), entry.date < cutoff { return nil }
+        return entry
+    }
+
     private func pruneExpiredHistory() {
         let entries = retained(history)
         do {
@@ -430,17 +481,26 @@ final class LibraryStore: ObservableObject {
     }
 
     private func load() {
-        guard FileManager.default.fileExists(atPath: file.path) else { return }
         do {
-            let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-            guard size <= Self.maximumBytes else { throw LibraryStoreError.invalid("本机资料文件超过 20 MB，未读取或覆盖原文件。") }
-            let snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: file))
+            let db = try LocalDatabase(root: root)
+            database = db
+            let migrated: Bool = try db.metadata("library-migrated") ?? false
+            let snapshot: Snapshot
+            if migrated {
+                snapshot = Snapshot(retention: try db.metadata("retention") ?? .forever,
+                    history: try db.all("voice", orderedByPosition: false), words: try db.all("word"))
+            } else if FileManager.default.fileExists(atPath: file.path) {
+                let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                guard size <= Self.maximumBytes else { throw LibraryStoreError.invalid("旧资料超过 20 MB，原文件已保留。") }
+                snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: file))
+            } else { snapshot = Snapshot(retention: .forever, history: [], words: []) }
             guard snapshot.version == 1 else { throw LibraryStoreError.invalid("本机资料版本不受支持，未覆盖原文件。") }
             guard snapshot.history.count <= Self.maximumHistory, snapshot.words.count <= Self.maximumWords,
                   Set(snapshot.history.map(\.id)).count == snapshot.history.count,
                   Set(snapshot.words.map(\.id)).count == snapshot.words.count,
                   Set(snapshot.words.map { Self.key($0.text) }).count == snapshot.words.count,
                   snapshot.history.allSatisfy({ $0.duration.isFinite && $0.duration >= 0 &&
+                      $0.timings?.isValid != false &&
                       $0.raw.count <= Self.maximumTextLength && $0.text.count <= Self.maximumTextLength &&
                       $0.application.count <= 300 && $0.mode.count <= 40 &&
                       $0.language.count <= 40 && $0.targetLanguage.count <= 80 &&
@@ -450,47 +510,54 @@ final class LibraryStore: ObservableObject {
                 throw LibraryStoreError.invalid("本机资料格式无效，未覆盖原文件。")
             }
             for word in snapshot.words { _ = try validatedWord(word.text) }
-            restoringRetention = true
-            retention = snapshot.retention
-            restoringRetention = false
-            history = snapshot.history.sorted { $0.date > $1.date }
-            words = snapshot.words
+            if !migrated {
+                try LocalDatabase.backupLegacy(file)
+                try db.transaction {
+                    try db.sync("voice", old: [HistoryEntry](), new: snapshot.history, index: Self.historyIndex)
+                    try db.sync("word", old: [DictionaryWord](), new: snapshot.words, ordered: true, index: Self.wordIndex)
+                    try db.setMetadata("retention", snapshot.retention)
+                    try db.setMetadata("library-migrated", true)
+                }
+            }
+            restoringRetention = true; retention = snapshot.retention; restoringRetention = false
+            history = snapshot.history.sorted { $0.date > $1.date }; words = snapshot.words
         } catch {
             loadFailed = true
-            errorMessage = "读取历史和词典失败：\(error.localizedDescription) 原文件已保留，请检查 \(file.path)。"
+            errorMessage = "读取历史和词典失败：\(error.localizedDescription) 原文件已保留。"
             return
         }
         pruneExpiredHistory()
     }
 
+    private static func historyIndex(_ entry: HistoryEntry, _ position: Int) -> DatabaseIndex {
+        DatabaseIndex(date: entry.date, category: entry.mode == "ask" ? "ask" : "dictate",
+            search: [entry.raw, entry.text, entry.application].joined(separator: "\n"), position: position)
+    }
+    private static func wordIndex(_ word: DictionaryWord, _ position: Int) -> DatabaseIndex {
+        DatabaseIndex(date: word.date, category: word.source.rawValue, search: word.text, position: position)
+    }
+    func wordPage(query: String, category: String, offset: Int) async throws -> DatabasePage<DictionaryWord> {
+        guard !loadFailed, let database else { throw LibraryStoreError.invalid(errorMessage ?? "词典未就绪。") }
+        return try await database.readPage("word", query: query, category: category, offset: offset, orderedByPosition: true)
+    }
     private func save(history: [HistoryEntry], words: [DictionaryWord]) throws {
-        guard !loadFailed else {
-            throw LibraryStoreError.invalid("资料文件此前读取失败，为保护原文件，本次更改未保存。请检查 \(file.path) 后重新打开应用。")
+        guard !loadFailed, let database else {
+            throw LibraryStoreError.invalid("资料此前读取失败，为保护原文件，本次更改未保存。请修复后重新打开应用。")
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(Snapshot(retention: retention, history: history, words: words))
-        guard data.count <= Self.maximumBytes else {
-            throw LibraryStoreError.invalid("本机资料超过 20 MB，本次更改未保存；请删除部分历史记录后重试。")
+        let remaining = Set(history.map(\.id))
+        let needsCleanup = self.history.contains { !remaining.contains($0.id) }
+        try database.transaction {
+            try database.sync("voice", old: self.history, new: history, index: Self.historyIndex)
+            try database.sync("word", old: self.words, new: words, ordered: true, index: Self.wordIndex)
+            try database.setMetadata("retention", retention)
         }
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true,
-                                               attributes: [.posixPermissions: 0o700])
-        let temporary = root.appendingPathComponent(".library-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        try data.write(to: temporary, options: .atomic)
-        // Set private permissions before replacing the live file, so any failure
-        // leaves the previous snapshot intact and matches the published state.
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temporary.path)
-        if FileManager.default.fileExists(atPath: file.path) {
-            _ = try FileManager.default.replaceItemAt(file, withItemAt: temporary, options: .usingNewMetadataOnly)
-        } else { try FileManager.default.moveItem(at: temporary, to: file) }
-        self.history = history
-        self.words = words
+        if self.history != history { self.history = history }
+        if self.words != words { self.words = words }
         errorMessage = nil
-        // Commit metadata first. A crash before cleanup is recovered on next load.
-        // Cleanup failures do not roll back already committed retention/deletion.
-        do { try cleanAudio(keeping: history); try cleanScreenshots(keeping: history) }
-        catch { errorMessage = "历史记录已保存，但部分已删除附件未能清理：\(error.localizedDescription)" }
+        if needsCleanup {
+            do { try cleanAudio(keeping: history); try cleanScreenshots(keeping: history) }
+            catch { errorMessage = "历史已保存，但部分已删除附件未能清理：\(error.localizedDescription)" }
+        }
     }
 
     private func report(_ error: Error) { errorMessage = "保存失败：\(error.localizedDescription)" }

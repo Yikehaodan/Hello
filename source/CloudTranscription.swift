@@ -2,7 +2,13 @@ import Foundation
 import zlib
 
 struct CloudSpeechConfiguration: Sendable {
+    enum Provider: Sendable, Equatable { case doubao, qwenNonStreaming }
     let apiKey: String
+    let provider: Provider
+    let endpoint: URL?
+    init(apiKey: String, provider: Provider = .doubao, endpoint: URL? = nil) {
+        self.apiKey = apiKey; self.provider = provider; self.endpoint = endpoint
+    }
     static func load() -> Self? {
         let path = AppPaths.data.appendingPathComponent("doubao.env")
         guard let body = try? String(contentsOf: path, encoding: .utf8),
@@ -10,6 +16,57 @@ struct CloudSpeechConfiguration: Sendable {
         let key = String(line.dropFirst("DOUBAO_API_KEY=".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         guard key.count >= 20, key.count <= 200, key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else { return nil }
         return Self(apiKey: key)
+    }
+    static let defaultQwenEndpoint = "https://llm-f993z6qmyy4uxuq0.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+    static func loadQwen(from path: URL = AppPaths.bailianSpeech) -> Self? {
+        guard let body = try? String(contentsOf: path, encoding: .utf8) else { return nil }
+        let values = Dictionary(uniqueKeysWithValues: body.split(separator: "\n").compactMap { line -> (String, String)? in
+            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return nil }
+            return (String(parts[0]), String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines))
+        })
+        let configuredEndpoint = values["DASHSCOPE_HTTP_URL"] ?? values["DASHSCOPE_WEBSOCKET_URL"] ?? defaultQwenEndpoint
+        guard let key = values["DASHSCOPE_API_KEY"], validKey(key),
+              let endpoint = validatedQwenEndpoint(configuredEndpoint) else { return nil }
+        return Self(apiKey: key, provider: .qwenNonStreaming, endpoint: endpoint)
+    }
+    static func saveQwen(apiKey: String, endpoint: String, to destination: URL = AppPaths.bailianSpeech) throws {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard validKey(key), let url = validatedQwenEndpoint(endpoint) else {
+            throw VoiceError.message("请填写有效的百炼 API Key 和业务空间 HTTPS 地址。")
+        }
+        let body = "DASHSCOPE_API_KEY=\(key)\nDASHSCOPE_HTTP_URL=\(url.absoluteString)\n"
+        let manager = FileManager.default
+        try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".bailian-" + UUID().uuidString)
+        defer { try? manager.removeItem(at: temporary) }
+        guard manager.createFile(atPath: temporary.path, contents: Data(body.utf8), attributes: [.posixPermissions: 0o600]) else {
+            throw VoiceError.message("无法保存百炼语音配置。")
+        }
+        if manager.fileExists(atPath: destination.path) { _ = try manager.replaceItemAt(destination, withItemAt: temporary) }
+        else { try manager.moveItem(at: temporary, to: destination) }
+        try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+    }
+    private static func validKey(_ key: String) -> Bool {
+        key.count >= 20 && key.count <= 200 && key.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ".")
+        }
+    }
+    private static func validatedQwenEndpoint(_ value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.contains("\n"), !trimmed.contains("\r"), let url = URL(string: trimmed),
+              let host = url.host?.lowercased(), host.hasSuffix(".maas.aliyuncs.com"),
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else { return nil }
+        if url.scheme == "https", url.path == "/compatible-mode/v1/chat/completions" { return url }
+        // Seamlessly migrate the previous real-time WebSocket configuration.
+        if url.scheme == "wss", url.path == "/api-ws/v1/inference" {
+            var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            parts?.scheme = "https"
+            parts?.path = "/compatible-mode/v1/chat/completions"
+            return parts?.url
+        }
+        return nil
     }
 }
 
@@ -162,35 +219,63 @@ final class CloudTranscription {
             return .recognize
         }
     }
-    private struct Input: Sendable { let snapshot: RecordingPCM; let final: Bool }
+    private struct Input: Sendable {
+        let snapshot: RecordingPCM
+        let final: Bool
+        let audioFile: Data?
+    }
     private let input: AsyncStream<Input>.Continuation
     private let worker: Task<CloudSpeechResult, Error>
+    let acceptsLiveAudio: Bool
+    private let qwenNonStreaming: Bool
     private var finishing = false
-    init(configuration: CloudSpeechConfiguration, mode: Mode, language: String) {
+    init(configuration: CloudSpeechConfiguration, mode: Mode, language: String, dictionary: String = "") {
         // Every item is a cumulative prefix, so replacing queued snapshots keeps
         // all audio while bounding memory during a slow connection.
         let (stream, continuation) = AsyncStream<Input>.makeStream(bufferingPolicy: .bufferingNewest(1))
         input = continuation
-        worker = Task.detached(priority: .userInitiated) { try await Self.run(stream, configuration: configuration, mode: mode, language: language) }
+        qwenNonStreaming = configuration.provider == .qwenNonStreaming
+        acceptsLiveAudio = configuration.provider != .qwenNonStreaming
+        worker = Task.detached(priority: .userInitiated) {
+            try await Self.run(stream, configuration: configuration, mode: mode, language: language, dictionary: dictionary)
+        }
     }
-    func offer(_ snapshot: RecordingPCM) { if !finishing { input.yield(Input(snapshot: snapshot, final: false)) } }
+    func offer(_ snapshot: RecordingPCM) {
+        if acceptsLiveAudio, !finishing { input.yield(Input(snapshot: snapshot, final: false, audioFile: nil)) }
+    }
     func finish(audio: URL) async throws -> CloudSpeechResult {
         guard !finishing else { throw VoiceError.message("语音会话已结束。") }
         finishing = true
-        let snapshot = try await Task.detached(priority: .userInitiated) { try RecordingPCM(wav: audio, live: false) }.value
-        input.yield(Input(snapshot: snapshot, final: true)); input.finish()
+        let needsFile = qwenNonStreaming
+        let (snapshot, audioFile) = try await Task.detached(priority: .userInitiated) {
+            let snapshot = try RecordingPCM(wav: audio, live: false)
+            let data = needsFile ? try Data(contentsOf: audio, options: .mappedIfSafe) : nil
+            return (snapshot, data)
+        }.value
+        input.yield(Input(snapshot: snapshot, final: true, audioFile: audioFile)); input.finish()
         let worker = worker
-        let timeout = Task { try? await Task.sleep(for: .seconds(8)); if !Task.isCancelled { worker.cancel() } }
+        let timeoutSeconds = qwenNonStreaming ? 30.0 : 8.0
+        let timeout = Task { try? await Task.sleep(for: .seconds(timeoutSeconds)); if !Task.isCancelled { worker.cancel() } }
         defer { timeout.cancel() }
         do {
             return try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
         } catch {
             try Task.checkCancellation()
+            if let error = error as? VoiceError { throw error }
             throw VoiceError.message("云端语音连接暂不可用，将完整识别录音。")
         }
     }
     func cancel() { finishing = true; input.finish(); worker.cancel() }
-    nonisolated private static func run(_ input: AsyncStream<Input>, configuration: CloudSpeechConfiguration, mode: Mode, language: String) async throws -> CloudSpeechResult {
+    nonisolated private static func run(_ input: AsyncStream<Input>, configuration: CloudSpeechConfiguration, mode: Mode,
+                                        language: String, dictionary: String) async throws -> CloudSpeechResult {
+        switch configuration.provider {
+        case .doubao: return try await runDoubao(input, configuration: configuration, mode: mode, language: language)
+        case .qwenNonStreaming:
+            return try await runQwenNonStreaming(input, configuration: configuration, language: language, dictionary: dictionary)
+        }
+    }
+    nonisolated private static func runDoubao(_ input: AsyncStream<Input>, configuration: CloudSpeechConfiguration, mode: Mode,
+                                               language: String) async throws -> CloudSpeechResult {
         try Task.checkCancellation()
         let recognition = SpeechRecognitionOptions(language: language)
         let translating: Bool
@@ -288,5 +373,84 @@ final class CloudTranscription {
                 return result
             }
         }, onCancel: { socket.cancel(with: .goingAway, reason: nil) })
+    }
+    nonisolated private static func runQwenNonStreaming(_ input: AsyncStream<Input>, configuration: CloudSpeechConfiguration,
+                                                        language: String, dictionary: String) async throws -> CloudSpeechResult {
+        guard let endpoint = configuration.endpoint else { throw VoiceError.message("百炼语音地址未配置。") }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.timeoutIntervalForRequest = 30
+        sessionConfiguration.timeoutIntervalForResource = 35
+        let transport = URLSession(configuration: sessionConfiguration)
+        defer { transport.invalidateAndCancel() }
+
+        // Open the TLS connection while the user is speaking, without uploading
+        // audio or starting a recognition task. The final POST can reuse it.
+        let warmup = Task {
+            guard var parts = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { return }
+            parts.path = "/"
+            guard let url = parts.url else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            request.timeoutInterval = 5
+            _ = try? await transport.data(for: request)
+        }
+
+        var audioFile: Data?
+        for await item in input {
+            try Task.checkCancellation()
+            if item.final { audioFile = item.audioFile; break }
+        }
+        _ = await warmup.result
+        guard let audioFile, !audioFile.isEmpty else { throw CancellationError() }
+        guard audioFile.count <= 10 * 1_024 * 1_024 else {
+            throw VoiceError.message("本次录音超过千问非流式模型的 10 MB 限制。")
+        }
+
+        let audio = "data:audio/wav;base64," + audioFile.base64EncodedString()
+        let context = String(dictionary.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2_000))
+        var messages: [[String: Any]] = []
+        if !context.isEmpty {
+            messages.append(["role": "system", "content": [["type": "text", "text": context]]])
+        }
+        messages.append(["role": "user", "content": [[
+            "type": "input_audio", "input_audio": ["data": audio]
+        ]]])
+        var asrOptions: [String: Any] = ["enable_itn": true]
+        if ["zh", "yue", "en", "ja", "de", "ko", "ru", "fr", "pt", "ar", "it", "es",
+            "hi", "id", "th", "tr", "uk", "vi", "cs", "da", "fil", "fi", "is", "ms", "no", "pl", "sv"].contains(language) {
+            asrOptions["language"] = language
+        }
+        let body: [String: Any] = [
+            "model": "qwen3-asr-flash",
+            "messages": messages,
+            "stream": false,
+            "asr_options": asrOptions
+        ]
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Hello/0.9.3", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await transport.data(for: request)
+        guard data.count <= 2_097_152,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw VoiceError.message("百炼语音结果无效。")
+        }
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let error = object["error"] as? [String: Any]
+            let message = error?["message"] as? String ?? object["message"] as? String ?? "HTTP 请求失败"
+            throw VoiceError.message("百炼语音请求失败：\(message)")
+        }
+        let choices = object["choices"] as? [[String: Any]]
+        let message = choices?.first?["message"] as? [String: Any]
+        var text = message?["content"] as? String ?? ""
+        if text.isEmpty, let content = message?["content"] as? [[String: Any]] {
+            text = content.compactMap { $0["text"] as? String }.joined()
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw VoiceError.message("百炼没有识别到语音。") }
+        return CloudSpeechResult(text: text, translationDraft: "")
     }
 }

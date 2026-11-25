@@ -5,10 +5,11 @@ final class FaultTransport: URLProtocol {
     static var requests: [Data] = []
     static var weatherFixture = false
     static var plainTextFixture: String?
+    static var textSequence: [String] = []
     static let lock = NSLock()
     static func reset(_ codes: [Int]) {
         lock.lock(); defer { lock.unlock() }
-        outcomes = codes; requests = []; weatherFixture = false; plainTextFixture = nil
+        outcomes = codes; requests = []; weatherFixture = false; plainTextFixture = nil; textSequence = []
     }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -27,7 +28,7 @@ final class FaultTransport: URLProtocol {
         let code = Self.outcomes.isEmpty ? 200 : Self.outcomes.removeFirst()
         Self.requests.append(bodyData)
         let weatherFixture = Self.weatherFixture
-        let plainTextFixture = Self.plainTextFixture
+        let plainTextFixture = Self.textSequence.isEmpty ? Self.plainTextFixture : Self.textSequence.removeFirst()
         Self.lock.unlock()
         if code < 0 {
             client?.urlProtocol(self, didFailWithError: URLError(URLError.Code(rawValue: code)))

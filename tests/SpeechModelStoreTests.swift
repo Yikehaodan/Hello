@@ -47,6 +47,18 @@ struct SpeechModelStoreTests {
         precondition(store.isReady(.zipformer) && store.selected == .sensevoice, "Completing an old download must not replace the current selection")
         let restored = SpeechModelStore(resources: resources, root: store.root, defaults: defaults, cloudAvailable: true)
         precondition(restored.selected == .sensevoice && restored.isReady(.zipformer))
+        let qwenSuite = "LightVoice.QwenDefaultTests." + UUID().uuidString
+        let qwenDefaults = UserDefaults(suiteName: qwenSuite)!
+        defer { qwenDefaults.removePersistentDomain(forName: qwenSuite) }
+        qwenDefaults.set(SpeechModelID.qwenLite.rawValue, forKey: SpeechModelStore.selectionKey)
+        let qwenDefault = SpeechModelStore(resources: resources, root: store.root, defaults: qwenDefaults,
+                                            cloudAvailable: true, qwenCloudAvailable: true)
+        precondition(qwenDefault.selected == .qwenCloud && qwenDefault.isReady(.qwenCloud),
+                     "first valid Bailian configuration becomes the default")
+        qwenDefault.select(.qwenLite)
+        let qwenRestored = SpeechModelStore(resources: resources, root: store.root, defaults: qwenDefaults,
+                                             cloudAvailable: true, qwenCloudAvailable: true)
+        precondition(qwenRestored.selected == .qwenLite, "manual model choice wins after the one-time default migration")
         try Data([0]).write(to: store.directory(.zipformer).appendingPathComponent("weights.onnx"))
         store.refresh()
         precondition(!store.isReady(.zipformer), "Truncated model must not be marked installed")

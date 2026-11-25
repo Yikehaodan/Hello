@@ -3,7 +3,7 @@
 </p>
 <p align="center">在你正在使用的应用里，用声音输入、翻译和改写文字。</p>
 <p align="center">
-  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.9.3/Hello-0.9.3-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.9.3 for macOS" /></a>
+  <a href="https://github.com/Yikehaodan/Hello/releases/download/v0.10.0/Hello-0.10.0-macOS-arm64.dmg"><img src="docs/assets/download-macos.svg" width="340" height="64" alt="下载 Hello v0.10.0 for macOS" /></a>
 </p>
 <p align="center"><sub>仅支持 Apple Silicon Mac · macOS 14+ · 公开预览版</sub></p>
 <p align="center"><a href="#功能">功能</a> · <a href="#演示">观看演示</a> · <a href="#开始使用">开始使用</a> · <a href="https://github.com/Yikehaodan/Hello/releases/latest">版本记录</a></p>
@@ -12,16 +12,15 @@
 
 | 功能 | 快捷键 | 用法 |
 | --- | --- | --- |
-| 听写 | `Fn` | 把口述变成文字。开启自动整理后，可处理改口、重复和标点。 |
+| 上下文听写（默认） | `Fn` | 结合当前输入框和可选截图，将口述整理成文字。 |
 | 翻译 | `Fn + Shift` | 说中文，直接输入英文等目标语言。 |
-| 上下文听写 | `Fn + Control` | 结合当前输入框和可选截图，校对人名与专业词。 |
 | Agent | `Fn + Space` | 说出任务，查看进度、确认操作并继续追问。 |
 
-Agent 适用于当前源码构建，v0.9.3 安装包仍为旧版问答。Agent 支持独立配置模型，详见 [Agent 使用与配置](docs/AGENT.md)。
+v0.10.0 安装包已包含 Agent。Agent 支持独立配置模型，详见 [Agent 使用与配置](docs/AGENT.md)。
 
 **个人记忆会学习你纠正过的写法。** 例如多次把“小雪”改成“晓雪”，Hello 会在之后的输入中参考这个名字。在“词典 → 个人记忆”中开启，支持查看、编辑和删除。[了解记忆规则](docs/MEMORY.md)。
 
-还支持个人词典、历史搜索和录音回放。
+还支持个人词典、历史搜索和录音回放。当前版本使用内置本地数据库，历史、词典和记忆每批加载 50 条，搜索覆盖全部记录。升级自动迁移旧数据并保留备份。
 
 ## 演示
 
@@ -40,7 +39,7 @@ https://github.com/user-attachments/assets/3470dc33-b43c-4236-a57d-f22b6f2c7b73
 
 当前版本尚未经过 Apple 公证。首次打开若被系统阻止，请按[安装帮助](docs/INSTALL.md#首次打开)操作。
 
-Agent 运行时，`Esc` 隐藏气泡，任务会继续；点击“停止”可中断任务。
+Agent 运行时，紧凑浮窗显示进度，完成后弹出结果窗口。`Esc` 可隐藏浮窗，点击“停止”可中断任务。任务与语音输入统一保存在“历史记录”。
 
 ## 权限与隐私
 
@@ -50,7 +49,7 @@ Agent 运行时，`Esc` 隐藏气泡，任务会继续；点击“停止”可�
 
 个人记忆默认关闭。开启后会观察听写后的局部纠正，并交给配置的文字服务整理；记忆保存在本机，可随时删除。[详细说明](docs/PERMISSIONS.md)。
 
-Agent 会使用所选模型与本机执行工具。任务记录独立保存在本机，可在 Agent 设置中清空。
+Agent 会使用所选模型与本机执行工具。任务记录保存在本机，可在“历史记录”中查看和删除，也可在 Agent 设置中清空。
 
 ## 帮助与反馈
 

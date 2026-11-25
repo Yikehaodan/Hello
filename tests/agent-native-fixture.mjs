@@ -1,3 +1,5 @@
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 const emit = event => process.stdout.write(JSON.stringify(event) + '\n');
 const lines = createInterface({ input: process.stdin });
@@ -5,10 +7,11 @@ let resume;
 lines.on('line', line => {
   const event = JSON.parse(line);
   if (event.type === 'start') {
+    appendFileSync(join(event.config.workspace, 'captured-context.jsonl'), JSON.stringify(event.context) + '\n');
     resume = event.resume || 'fixture-session';
     emit({ type: 'session', id: resume });
     emit({ type: 'delta', text: '正在处理' });
-    emit({ type: 'lookup', id: 'search', kind: 'search', query: 'fixture' });
+    emit({ type: 'lookup', id: 'search', kind: 'weather', city: 'fixture' });
   }
   if (event.type === 'reply' && event.id === 'search') emit({ type: 'permission', id: 'write', tool: 'Write', input: { file_path: '/tmp/fixture', content: 'example' } });
   if (event.type === 'reply' && event.id === 'write') {
