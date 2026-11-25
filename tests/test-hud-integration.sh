@@ -12,4 +12,5 @@ awk '/^if let index = CommandLine.arguments.firstIndex/ { exit } { print }' sour
 sources=(source/*.swift)
 sources=("${(@)sources:#source/main.swift}")
 xcrun swiftc -vfsoverlay "$test_temp/overlay.json" -module-cache-path "${TMPDIR:-/tmp}/lightvoice-module-cache" -target arm64-apple-macos14.0 "${sources[@]}" "$test_temp/AppDelegate.swift" tests/FaultTransport.swift "${HUD_TEST_SOURCE:-tests/HUDIntegrationTests.swift}" -o "$test_temp/hud-tests" -lz -framework AppKit -framework SwiftUI -framework AVFoundation -framework ApplicationServices -framework ServiceManagement
-"$test_temp/hud-tests" "${HUD_OUTPUT_DIR:-$PWD/tests/hud-validation}"
+HELLO_TEST_NODE="${HELLO_TEST_NODE:-$(command -v node || true)}" \
+    "$test_temp/hud-tests" "${HUD_OUTPUT_DIR:-$PWD/tests/hud-validation}"

@@ -7,7 +7,10 @@ import AppKit
         let output = URL(fileURLWithPath: CommandLine.arguments[1])
         let runtime = root.appendingPathComponent("runtime")
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
-        let node = ProcessInfo.processInfo.environment["HELLO_TEST_NODE"] ?? "/Applications/Hello.app/Contents/Resources/AgentRuntime/node"
+        guard let node = ProcessInfo.processInfo.environment["HELLO_TEST_NODE"],
+              FileManager.default.isExecutableFile(atPath: node) else {
+            throw VoiceError.message("Agent UI tests require HELLO_TEST_NODE to point to an executable Node.js runtime.")
+        }
         try FileManager.default.createSymbolicLink(at: runtime.appendingPathComponent("node"), withDestinationURL: URL(fileURLWithPath: node))
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "tests/agent-native-fixture.mjs"), to: runtime.appendingPathComponent("bridge.mjs"))
         var key = "fixture-key"
